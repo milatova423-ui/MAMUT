@@ -1,0 +1,381 @@
+/* ═════════════════════════════════════════════════════════
+   ESTRUCTURA + MENÚ LATERAL (100% responsivo)
+
+   Toda la responsividad vive aquí, en CSS puro, y no en clases
+   de Tailwind: el estado lo llevan dos atributos del contenedor
+   y las reglas hacen el resto.
+
+     #app-shell[data-menu="abierto|cerrado"]      → cajón en móvil
+     #app-shell[data-escritorio="visible|oculto"] → menú plegado en escritorio
+
+   Cada atributo manda solo en su ancho, así que un menú plegado en
+   escritorio nunca deja botones sueltos al encoger a móvil.
+   ═════════════════════════════════════════════════════════ */
+
+:root {
+  --menu-ancho: 18rem;
+  --menu-mov: 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+  --menu-borde: rgb(241 245 249);
+}
+
+/* ── Contenedor general ─────────────────────────────────── */
+.app-shell {
+  display: flex;
+  min-height: 100vh;
+  min-height: 100dvh; /* barra del navegador móvil: dvh evita el corte */
+  background: rgb(248 250 252);
+}
+
+.app-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0; /* sin esto una tabla ancha estira todo el layout */
+}
+
+.app-main {
+  flex: 1;
+  padding: 1rem;
+  padding-bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
+}
+.app-main-interior {
+  max-width: 72rem;
+  margin: 0 auto;
+}
+
+/* ── Cajón lateral ──────────────────────────────────────── */
+.app-sidebar {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 40;
+  width: min(var(--menu-ancho), 86vw);
+  display: flex;
+  flex-direction: column;
+  background: white;
+  border-right: 1px solid var(--menu-borde);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.05);
+  transform: translateX(-100%);
+  transition: transform var(--menu-mov);
+  overscroll-behavior: contain;
+}
+.app-shell[data-menu="abierto"] .app-sidebar {
+  transform: translateX(0);
+  box-shadow: 0 20px 45px rgb(15 23 42 / 0.18);
+}
+
+.app-sidebar-interior {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+/* Hueco que reserva el sitio del menú en escritorio (en móvil no existe,
+   porque ahí el cajón flota encima del contenido). */
+.app-sidebar-espacio {
+  display: none;
+  flex-shrink: 0;
+}
+
+/* ── Cabecera del cajón ─────────────────────────────────── */
+.app-sidebar-cab {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 1.25rem 1rem 1rem 1.25rem;
+  padding-top: calc(1.25rem + env(safe-area-inset-top, 0px));
+}
+.app-sidebar-marca {
+  min-width: 0; /* habilita el recorte del nombre largo */
+}
+.app-sidebar-titulo {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 1rem;
+  font-weight: 800;
+  letter-spacing: -0.025em;
+  color: rgb(15 23 42);
+  min-width: 0;
+}
+.app-sidebar-logo {
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: 0.75rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: white;
+}
+.app-sidebar-nombre,
+.app-sidebar-desc {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.app-sidebar-desc {
+  margin-top: 0.25rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: rgb(100 116 139);
+}
+.app-sidebar-acciones {
+  display: flex;
+  align-items: center;
+  gap: 0.125rem;
+  flex-shrink: 0;
+}
+
+/* ── Cuerpo y pie del cajón ─────────────────────────────── */
+.app-sidebar-nav {
+  flex: 1;
+  min-height: 0; /* obligatorio para que el scroll sea del nav y no del cajón */
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0 0.875rem 0.5rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.app-sidebar-pie {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.75rem 0.875rem;
+  padding-bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
+  border-top: 1px solid var(--menu-borde);
+}
+
+/* ── Fondo oscuro (solo móvil) ──────────────────────────── */
+.app-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  background: rgb(15 23 42 / 0.5);
+  backdrop-filter: blur(4px);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity var(--menu-mov), visibility var(--menu-mov);
+}
+.app-shell[data-menu="abierto"] .app-overlay {
+  opacity: 1;
+  visibility: visible;
+}
+
+/* ── Barra superior (solo móvil) ────────────────────────── */
+.app-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.625rem 0.875rem;
+  padding-top: calc(0.625rem + env(safe-area-inset-top, 0px));
+  background: rgb(255 255 255 / 0.85);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--menu-borde);
+}
+.app-topbar-marca {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+.app-topbar-logo {
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 0.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: white;
+}
+.app-topbar-nombre {
+  font-size: 0.875rem;
+  font-weight: 800;
+  letter-spacing: -0.025em;
+  color: rgb(15 23 42);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Contrapeso del botón de menú para que la marca quede centrada */
+.app-topbar-hueco {
+  width: 2.25rem;
+  flex-shrink: 0;
+}
+
+/* ── Botones de menú ────────────────────────────────────── */
+.btn-menu {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.5rem;
+  border: none;
+  border-radius: 0.625rem;
+  background: transparent;
+  color: rgb(100 116 139);
+  cursor: pointer;
+  transition: background-color 0.15s, color 0.15s;
+}
+.btn-menu:hover {
+  background: rgb(241 245 249);
+  color: rgb(15 23 42);
+}
+.btn-menu:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgb(59 130 246 / 0.3);
+}
+
+/* Botón flotante para volver a mostrar el menú plegado */
+.btn-expandir {
+  position: fixed;
+  top: 1rem;
+  left: 1rem;
+  top: calc(1rem + env(safe-area-inset-top, 0px));
+  left: calc(1rem + env(safe-area-inset-left, 0px));
+  z-index: 30;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 0.5rem;
+  background: white;
+  border: 1px solid rgb(226 232 240);
+  border-radius: 0.75rem;
+  box-shadow: 0 2px 8px rgb(0 0 0 / 0.1);
+  color: rgb(71 85 105);
+  cursor: pointer;
+  transition: background-color 0.15s, color 0.15s;
+}
+.btn-expandir:hover {
+  background: rgb(248 250 252);
+  color: rgb(15 23 42);
+}
+.btn-expandir:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgb(59 130 246 / 0.3);
+}
+
+/* Qué botón se ve en cada ancho. Al ser CSS puro es imposible que
+   sobrevivan los dos a la vez al cambiar de tamaño la ventana. */
+.solo-movil {
+  display: inline-flex;
+}
+.solo-escritorio {
+  display: none;
+}
+
+/* ── Tamaño de los iconos ───────────────────────────────────
+   Lucide copia las clases del <i> al <svg>, pero `w-5 h-5` solo
+   existe si cargó Tailwind (CDN). El menú tiene que verse bien
+   también sin internet, así que aquí se fija su medida. */
+.btn-menu svg,
+.btn-expandir svg,
+.app-sidebar-logo svg {
+  width: 1.25rem;
+  height: 1.25rem;
+  flex-shrink: 0;
+}
+.app-topbar-logo svg {
+  width: 1rem;
+  height: 1rem;
+  flex-shrink: 0;
+}
+.nav-link svg,
+.nav-group-left svg {
+  width: 1.125rem;
+  height: 1.125rem;
+  flex-shrink: 0;
+}
+.nav-link-sub svg,
+.nav-group-right svg {
+  width: 1rem;
+  height: 1rem;
+  flex-shrink: 0;
+}
+
+/* ── Dedos: objetivos táctiles más altos ────────────────── */
+@media (pointer: coarse) {
+  .nav-link,
+  .nav-group-btn {
+    padding-top: 0.75rem;
+    padding-bottom: 0.75rem;
+  }
+  .btn-menu,
+  .btn-expandir {
+    padding: 0.625rem;
+  }
+}
+
+/* ── Pantallas bajas (móvil en horizontal) ──────────────── */
+@media (max-height: 640px) {
+  .app-sidebar-cab {
+    padding-bottom: 0.625rem;
+    padding-top: calc(0.875rem + env(safe-area-inset-top, 0px));
+  }
+  .app-sidebar-desc {
+    display: none;
+  }
+  .nav-link,
+  .nav-group-btn {
+    padding-top: 0.5rem;
+    padding-bottom: 0.5rem;
+  }
+}
+
+/* ── Tablet ─────────────────────────────────────────────── */
+@media (min-width: 768px) {
+  .app-main {
+    padding: 1.5rem;
+    padding-bottom: calc(1.5rem + env(safe-area-inset-bottom, 0px));
+  }
+}
+
+/* ── Escritorio: el menú deja de ser un cajón ───────────── */
+@media (min-width: 1024px) {
+  .app-sidebar {
+    transform: translateX(0);
+    box-shadow: 0 1px 3px rgb(0 0 0 / 0.05);
+    padding-left: env(safe-area-inset-left, 0px);
+  }
+  .app-shell[data-escritorio="oculto"] .app-sidebar {
+    transform: translateX(-100%);
+    box-shadow: none;
+  }
+
+  .app-sidebar-espacio {
+    display: block;
+    width: var(--menu-ancho);
+    transition: width var(--menu-mov);
+  }
+  .app-shell[data-escritorio="oculto"] .app-sidebar-espacio {
+    width: 0;
+  }
+  .app-shell[data-escritorio="oculto"] .btn-expandir {
+    display: inline-flex;
+  }
+
+  .app-overlay,
+  .app-topbar {
+    display: none;
+  }
+  .solo-movil {
+    display: none;
+  }
+  .solo-escritorio {
+    display: inline-flex;
+  }
+
+  .app-main {
+    padding: 2rem;
+  }
+}
