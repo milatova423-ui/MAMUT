@@ -120,6 +120,19 @@ var App = window.App || (window.App = {});
 
     // ═══ Estructura ═══════════════════════════════════════════
     _renderHTML() {
+      try {
+        this._renderHTMLInterno();
+      } catch (e) {
+        console.error('[Configuración] error al dibujar la pantalla', e);
+        this.container.innerHTML = '<div class="card" style="margin-top: 1rem;">'
+          + '<h2 class="section-title" style="color: ' + ERROR + ';">No se pudo mostrar la configuración</h2>'
+          + '<p class="text-xs" style="color: ' + TEXTO2 + '; line-height: 1.6;">Error: <strong>' + App.escapeHtml(e && e.message ? e.message : String(e)) + '</strong></p>'
+          + '<p class="text-xs" style="color: ' + TEXTO2 + '; margin-top: 0.5rem;">Recarga con Ctrl + F5. Si sigue igual, abre F12 → Consola y copia el error rojo.</p>'
+          + '</div>';
+      }
+    }
+
+    _renderHTMLInterno() {
       var self = this;
 
       this.container.innerHTML = ''
@@ -273,7 +286,7 @@ var App = window.App || (window.App = {});
 
       function fila(ok, titulo, detalle) {
         return '<div style="display: flex; align-items: flex-start; gap: 0.5rem; font-size: 0.8125rem; line-height: 1.5;">'
-          + '<i data-lucide="' + (ok === null ? 'circle-dashed' : ok ? 'check-circle-2' : 'x-circle') + '" class="w-4 h-4" style="color: ' + (ok === null ? TENUE : ok ? OK : ERROR) + '; flex-shrink: 0; margin-top: 0.15rem;"></i>'
+          + '<i data-lucide="' + (ok === null ? 'circle' : ok ? 'check-circle-2' : 'x-circle') + '" class="w-4 h-4" style="color: ' + (ok === null ? TENUE : ok ? OK : ERROR) + '; flex-shrink: 0; margin-top: 0.15rem;"></i>'
           + '<div style="min-width: 0;">'
             + '<strong style="color: ' + TEXTO + ';">' + titulo + '</strong>'
             + (detalle ? '<div style="color: ' + TEXTO2 + '; word-break: break-word;">' + App.escapeHtml(detalle) + '</div>' : '')
@@ -707,6 +720,14 @@ var App = window.App || (window.App = {});
 
     // ═══ Eventos ══════════════════════════════════════════════
     _bind() {
+      try {
+        this._bindInterno();
+      } catch (e) {
+        console.error('[Configuración] error al activar los botones', e);
+      }
+    }
+
+    _bindInterno() {
       var self = this;
       var c = this.container;
 
@@ -949,6 +970,16 @@ var App = window.App || (window.App = {});
 
     /** Verifica SUNAT, las credenciales y la API de facturación, y lo muestra. */
     async _probar(completo) {
+      try {
+        await this._probarInterno(completo);
+      } catch (e) {
+        console.error('[Configuración] error al probar la conexión', e);
+        this.testing = false;
+        if (this.container && this.container.isConnected) this._rerender();
+      }
+    }
+
+    async _probarInterno(completo) {
       if (this.testing) return;
 
       App.saveConfig(this.config);
