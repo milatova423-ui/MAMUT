@@ -71,6 +71,8 @@ var App = window.App || (window.App = {});
       this.testing = false;
       this.testResult = null;
       this.cargaMsg = null;
+      this.certMsg = null;
+      this.certBusy = false;
 
       // Empresa (API)
       this.empresa = null;
@@ -112,7 +114,7 @@ var App = window.App || (window.App = {});
           + this._navHTML()
 
           + '<div style="margin-top: 1.25rem;">'
-            + (this.tab === 'conexion' ? this._tabConexionHTML()
+            + (this.tab === 'conexion' ? this._tabConexionHTML() + this._certificadoHTML()
               : this.tab === 'empresa' ? this._tabEmpresaHTML()
               : this._tabSistemaHTML())
           + '</div>'
@@ -288,6 +290,53 @@ var App = window.App || (window.App = {});
           + '</div>'
 
           + this._testResultHTML()
+        + '</div>';
+    }
+
+    // ═══ Certificado digital (.pfx) ═══════════════════════════
+    _certificadoHTML() {
+      var c = this.config;
+      var info = c.cert_info;
+      var msg = this.certMsg;
+
+      return ''
+        + '<div class="card" style="margin-top: 1rem;">'
+          + '<h2 class="section-title"><i data-lucide="shield-check" class="w-5 h-5"></i> Certificado digital</h2>'
+          + '<p class="text-xs" style="color: rgb(71 85 105); line-height: 1.6; margin-bottom: 1rem;">'
+            + 'Carga el archivo .pfx (o .p12) del Certificado Digital Tributario con su contraseña. '
+            + 'Se valida aquí mismo y se guarda en este navegador.'
+          + '</p>'
+
+          + (info
+            ? '<div style="margin-bottom: 1rem; padding: 1rem; border-radius: 0.875rem; background: ' + SUPERFICIE + ';">'
+                + '<div style="font-weight: 700; color: ' + TEXTO + '; display: flex; align-items: center; gap: 0.5rem;">'
+                  + '<i data-lucide="check-circle-2" class="w-5 h-5" style="color: ' + OK + ';"></i> Certificado cargado'
+                + '</div>'
+                + '<div style="margin-top: 0.625rem; font-size: 0.8125rem; color: ' + TEXTO2 + '; line-height: 1.7;">'
+                  + '<div><strong style="color: ' + TEXTO + ';">' + App.escapeHtml(info.titular || '—') + '</strong></div>'
+                  + '<div>Emisor: ' + App.escapeHtml(info.emisor || '—') + '</div>'
+                  + '<div>Vigente desde ' + App.escapeHtml(info.desde || '—') + ' hasta ' + App.escapeHtml(info.hasta || '—') + '</div>'
+                  + '<div>Archivo: ' + App.escapeHtml(info.archivo || '—') + '</div>'
+                + '</div>'
+                + '<div class="cfg-acciones" style="margin-top: 0.75rem;">'
+                  + '<button id="s-cert-quitar" type="button" class="btn-secondary text-sm"><i data-lucide="trash-2" class="w-4 h-4"></i> Quitar certificado</button>'
+                + '</div>'
+              + '</div>'
+            : '')
+
+          + '<div class="cfg-grid">'
+            + this._campo('Archivo del certificado (.pfx / .p12)', '<input id="s-cert-file" type="file" accept=".pfx,.p12" class="input" />')
+            + this._campo('Contraseña del certificado', '<input id="s-cert-pass" type="password" class="input font-mono" autocomplete="new-password" placeholder="La que pusiste al descargarlo" />')
+          + '</div>'
+
+          + '<div class="cfg-acciones" style="margin-top: 1rem; align-items: center;">'
+            + '<button id="s-cert-cargar" type="button" class="btn-primary" ' + (this.certBusy ? 'disabled' : '') + '>'
+              + (this.certBusy
+                ? '<i data-lucide="loader-2" class="w-4 h-4 icon-spin"></i> Validando...'
+                : '<i data-lucide="upload" class="w-4 h-4"></i> ' + (info ? 'Reemplazar certificado' : 'Cargar certificado'))
+            + '</button>'
+            + (msg ? '<span style="font-size: 0.8125rem; font-weight: 600; color: ' + (msg.tipo === 'ok' ? OK : ERROR) + ';">' + App.escapeHtml(msg.texto) + '</span>' : '')
+          + '</div>'
         + '</div>';
     }
 
@@ -644,6 +693,19 @@ var App = window.App || (window.App = {});
       c.querySelector('#s-cargar').addEventListener('click', function () { fileIn.click(); });
       fileIn.addEventListener('change', function () { if (fileIn.files[0]) self._cargarCredenciales(fileIn.files[0]); });
       c.querySelector('#s-plantilla').addEventListener('click', function () { self._descargarPlantilla(); });
+
+      var certCargar = c.querySelector('#s-cert-cargar');
+      if (certCargar) certCargar.addEventListener('click', function () { self._cargarCertificado(); });
+      var certQuitar = c.querySelector('#s-cert-quitar');
+      if (certQuitar) certQuitar.addEventListener('click', function () {
+        if (!window.confirm('¿Quitar el certificado guardado en este navegador?')) return;
+        delete self.config.cert_pfx;
+        delete self.config.cert_pass;
+        delete self.config.cert_info;
+        App.saveConfig(self.config);
+        self.certMsg = { tipo: 'ok', texto: 'Certificado quitado.' };
+        self._rerender();
+      });
       c.querySelector('#s-test').addEventListener('click', function () { self._probar(); });
 
       var irEmpresa = c.querySelector('#s-ir-empresa');
@@ -734,6 +796,106 @@ var App = window.App || (window.App = {});
         self.saved = false;
         self._rerender();
       }, 2000);
+    }
+
+    /** Carga la librería forge (solo cuando se necesita) para leer el .pfx. */
+    _cargarForge() {
+      return new Promise(function (resolve, reject) {
+        if (window.forge) return resolve(window.forge);
+        var sc = document.createElement('script');
+        sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/forge/1.3.1/forge.min.js';
+        sc.onload = function () { resolve(window.forge); };
+        sc.onerror = function () { reject(new Error('No se pudo cargar la librería para leer el certificado. Revisa tu internet.')); };
+        document.head.appendChild(sc);
+      });
+    }
+
+    _leerArchivoBinario(file) {
+      return new Promise(function (resolve, reject) {
+        var r = new FileReader();
+        r.onload = function () {
+          var bytes = new Uint8Array(r.result);
+          var bin = '';
+          for (var i = 0; i < bytes.length; i += 8192) {
+            bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 8192));
+          }
+          resolve(bin);
+        };
+        r.onerror = function () { reject(new Error('No se pudo abrir el archivo.')); };
+        r.readAsArrayBuffer(file);
+      });
+    }
+
+    /** Valida el .pfx con su contraseña y lo guarda con sus datos (titular, vigencia). */
+    async _cargarCertificado() {
+      var c = this.container;
+      var file = c.querySelector('#s-cert-file').files[0];
+      var pass = c.querySelector('#s-cert-pass').value;
+
+      if (!file) { this.certMsg = { tipo: 'error', texto: 'Elige el archivo .pfx o .p12.' }; this._rerender(); return; }
+      if (!pass) { this.certMsg = { tipo: 'error', texto: 'Escribe la contraseña del certificado.' }; this._rerender(); return; }
+
+      this.certBusy = true;
+      this.certMsg = null;
+      this._rerender();
+
+      try {
+        var forge = await this._cargarForge();
+        var bin = await this._leerArchivoBinario(file);
+
+        var p12;
+        try {
+          p12 = forge.pkcs12.pkcs12FromAsn1(forge.asn1.fromDer(bin), false, pass);
+        } catch (e) {
+          if (/mac|password|contrase/i.test(e.message)) throw new Error('Contraseña incorrecta.');
+          throw new Error('El archivo no es un certificado .pfx válido.');
+        }
+
+        var OID_CERT = forge.pki.oids.certBag;
+        var OID_KEY = forge.pki.oids.pkcs8ShroudedKeyBag;
+        var certBags = (p12.getBags({ bagType: OID_CERT })[OID_CERT] || []);
+        var keyBags = (p12.getBags({ bagType: OID_KEY })[OID_KEY] || []);
+        if (!certBags.length) throw new Error('El archivo no contiene ningún certificado.');
+        if (!keyBags.length) throw new Error('El archivo no contiene la clave privada (necesaria para firmar).');
+
+        // Certificado que corresponde a la clave privada
+        var key = keyBags[0].key;
+        var cert = certBags[0].cert;
+        for (var i = 0; i < certBags.length; i++) {
+          var cb = certBags[i].cert;
+          if (cb && cb.publicKey && key && key.n && cb.publicKey.n && cb.publicKey.n.compareTo(key.n) === 0) { cert = cb; break; }
+        }
+
+        var ahora = new Date();
+        var fmt = function (d) { return d.toLocaleDateString('es-PE'); };
+        if (cert.validity.notAfter < ahora) throw new Error('El certificado está vencido (venció el ' + fmt(cert.validity.notAfter) + ').');
+        if (cert.validity.notBefore > ahora) throw new Error('El certificado aún no está vigente (desde el ' + fmt(cert.validity.notBefore) + ').');
+
+        var cn = cert.subject.getField('CN');
+        var cnEmisor = cert.issuer.getField('CN');
+        var ruc = String(this.config.ruc || '');
+        var mencionaRuc = !ruc || cert.subject.attributes.some(function (a) { return String(a.value).indexOf(ruc) !== -1; });
+
+        this.config.cert_pfx = forge.util.encode64(bin);
+        this.config.cert_pass = pass;
+        this.config.cert_info = {
+          titular: cn ? cn.value : '',
+          emisor: cnEmisor ? cnEmisor.value : '',
+          desde: fmt(cert.validity.notBefore),
+          hasta: fmt(cert.validity.notAfter),
+          archivo: file.name,
+        };
+        App.saveConfig(this.config);
+        this.certMsg = {
+          tipo: 'ok',
+          texto: mencionaRuc ? 'Certificado cargado correctamente.' : 'Certificado cargado, pero no menciona tu RUC. Verifica que sea el correcto.',
+        };
+      } catch (e) {
+        this.certMsg = { tipo: 'error', texto: e.message };
+      } finally {
+        this.certBusy = false;
+        this._rerender();
+      }
     }
 
     /** Lee un .json con las credenciales y llena el formulario. */
