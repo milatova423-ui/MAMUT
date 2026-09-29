@@ -65,11 +65,12 @@ var App = window.App || (window.App = {});
       // Conexión
       this.config = App.getConfig();
       // Ingreso directo con SUNAT (vía función /api/sunat-token en Vercel)
-      this.config.sunat_token_url = this.config.sunat_token_url || (window.location.origin + '/api/sunat-token');
+      this.config.sunat_token_url = '/api/sunat-token';
       this.config.jsonpe_url = this.config.jsonpe_url || 'https://api.json.pe';
       this.saved = false;
       this.testing = false;
       this.testResult = null;
+      this.cargaMsg = null;
 
       // Empresa (API)
       this.empresa = null;
@@ -236,7 +237,7 @@ var App = window.App || (window.App = {});
     // ═══ 1. Conexión ══════════════════════════════════════════
     _tabConexionHTML() {
       var c = this.config;
-      var listo = !!c.sunat_token_url;
+      var listo = true;
 
       return ''
         + '<div class="card">'
@@ -246,6 +247,12 @@ var App = window.App || (window.App = {});
             + 'El botón comprueba que SUNAT entregue el token.'
           + '</p>'
 
+          + '<div class="cfg-acciones" style="margin-bottom: 1rem; align-items: center;">'
+            + '<button id="s-cargar" type="button" class="btn-secondary text-sm"><i data-lucide="upload" class="w-4 h-4"></i> Cargar credenciales</button>'
+            + '<button id="s-plantilla" type="button" class="btn-secondary text-sm"><i data-lucide="download" class="w-4 h-4"></i> Descargar plantilla</button>'
+            + '<input id="s-cargar-file" type="file" accept=".json,application/json" style="display: none;" />'
+            + (this.cargaMsg ? '<span style="font-size: 0.8125rem; font-weight: 600; color: ' + (this.cargaMsg.tipo === 'ok' ? OK : ERROR) + ';">' + App.escapeHtml(this.cargaMsg.texto) + '</span>' : '')
+          + '</div>'
           + '<div class="cfg-grid">'
             + this._campo('RUC', '<input id="s-ruc" class="input font-mono" maxlength="11" value="' + App.escapeHtml(c.ruc || '') + '" placeholder="11 dígitos" />')
             + this._campo('Usuario SOL', '<input id="s-usuario-sol" class="input font-mono" autocomplete="off" value="' + App.escapeHtml(c.usuario_sol || '') + '" placeholder="Ej: MODDATOS" />', 'Es el usuario, no el RUC. Se une al RUC automáticamente.')
@@ -254,12 +261,6 @@ var App = window.App || (window.App = {});
           + '<div class="cfg-grid" style="margin-top: 0.875rem;">'
             + this._campo('Id de la API SUNAT', '<input id="s-client-id" class="input font-mono" autocomplete="off" value="' + App.escapeHtml(c.client_id || '') + '" placeholder="e89e00c9-264e-..." />', 'Menú SOL → Registro de su aplicación.')
             + this._campo('Clave de la API SUNAT', '<input id="s-client-secret" type="password" class="input font-mono" autocomplete="new-password" value="' + App.escapeHtml(c.client_secret || '') + '" placeholder="Clave de la aplicación" />')
-          + '</div>'
-
-          + '<div style="margin-top: 0.875rem;">'
-          + this._campo('URL de la función de token SUNAT',
-              '<input id="s-sunat-url" class="input font-mono" value="' + App.escapeHtml(c.sunat_token_url || '') + '" placeholder="https://mamut-one.vercel.app/api/sunat-token" />',
-              'Es el archivo api/sunat-token.js desplegado en Vercel.')
           + '</div>'
 
           + '<div style="margin-top: 1.25rem; padding-top: 1.25rem; border-top: 1px solid rgb(241 245 249);">'
@@ -626,18 +627,23 @@ var App = window.App || (window.App = {});
 
       [['#s-ruc', 'ruc'], ['#s-usuario-sol', 'usuario_sol'], ['#s-clave-sol', 'clave_sol'],
        ['#s-client-id', 'client_id'], ['#s-client-secret', 'client_secret'],
-       ['#s-sunat-url', 'sunat_token_url'], ['#s-jsonpe-url', 'jsonpe_url'],
+        ['#s-jsonpe-url', 'jsonpe_url'],
        ['#s-jsonpe-token', 'jsonpe_token']].forEach(function (par) {
         var el = c.querySelector(par[0]);
         if (!el) return;
         el.addEventListener('input', function (e) {
           self.config[par[1]] = e.target.value;
           var test = c.querySelector('#s-test');
-          if (test) test.disabled = self.testing || !self.config.sunat_token_url;
+          if (test) test.disabled = self.testing;
         });
       });
 
       c.querySelector('#s-save').addEventListener('click', function () { self._guardarConfig(); });
+
+      var fileIn = c.querySelector('#s-cargar-file');
+      c.querySelector('#s-cargar').addEventListener('click', function () { fileIn.click(); });
+      fileIn.addEventListener('change', function () { if (fileIn.files[0]) self._cargarCredenciales(fileIn.files[0]); });
+      c.querySelector('#s-plantilla').addEventListener('click', function () { self._descargarPlantilla(); });
       c.querySelector('#s-test').addEventListener('click', function () { self._probar(); });
 
       var irEmpresa = c.querySelector('#s-ir-empresa');
@@ -730,6 +736,53 @@ var App = window.App || (window.App = {});
       }, 2000);
     }
 
+    /** Lee un .json con las credenciales y llena el formulario. */
+    _cargarCredenciales(file) {
+      var self = this;
+      var CAMPOS = ['ruc', 'usuario_sol', 'clave_sol', 'client_id', 'client_secret', 'jsonpe_url', 'jsonpe_token'];
+      var lector = new FileReader();
+      lector.onload = function () {
+        try {
+          var d = JSON.parse(String(lector.result).replace(/^\uFEFF/, ''));
+          var n = 0;
+          CAMPOS.forEach(function (k) {
+            if (d[k] !== undefined && d[k] !== null && String(d[k]) !== '') { self.config[k] = String(d[k]).trim(); n++; }
+          });
+          if (!n) throw new Error('El archivo no trae ningún campo reconocido.');
+          App.saveConfig(self.config);
+          self.cargaMsg = { tipo: 'ok', texto: 'Se cargaron ' + n + ' campos. Ahora pulsa "Ingresar con SUNAT".' };
+        } catch (e) {
+          self.cargaMsg = { tipo: 'error', texto: 'No se pudo leer el archivo: ' + e.message };
+        }
+        self._rerender();
+      };
+      lector.onerror = function () {
+        self.cargaMsg = { tipo: 'error', texto: 'No se pudo abrir el archivo.' };
+        self._rerender();
+      };
+      lector.readAsText(file);
+    }
+
+    _descargarPlantilla() {
+      var plantilla = {
+        ruc: '20123456789',
+        usuario_sol: 'USUARIOSOL',
+        clave_sol: 'clave-sol',
+        client_id: 'id-de-la-api-sunat',
+        client_secret: 'clave-de-la-api-sunat',
+        jsonpe_url: 'https://api.json.pe',
+        jsonpe_token: 'token-de-api-json-pe',
+      };
+      var blob = new Blob([JSON.stringify(plantilla, null, 2)], { type: 'application/json' });
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'credenciales-sunat.json';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
+    }
+
     async _probar() {
       App.saveConfig(this.config);
       this.testing = true;
@@ -738,7 +791,7 @@ var App = window.App || (window.App = {});
 
       try {
         var cf = this.config;
-        var r = await fetch(cf.sunat_token_url, {
+        var r = await fetch('/api/sunat-token', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
