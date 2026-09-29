@@ -3,8 +3,9 @@ var App = window.App || (window.App = {});
 /**
  * Configuración en tres pasos:
  *   1. Conexión  — credenciales de la aplicación registrada en SUNAT (Menú SOL):
- *                  nombre, URL de SUNAT, Id y Clave. Muestra el ESTADO de la
- *                  conexión (SUNAT alcanzable, credenciales, API de facturación).
+ *                  nombre, URL de SUNAT, Id y Clave, más el acceso con RUC,
+ *                  usuario SOL y Clave SOL. Muestra el ESTADO de la conexión
+ *                  (SUNAT alcanzable, credenciales, acceso SOL, API de facturación).
  *   2. Mi empresa — datos reales traídos de GET /empresa, editables con
  *      PUT /empresa, más logo (POST /empresa/logo) y certificado
  *      (POST /empresa/certificado).
@@ -295,7 +296,7 @@ var App = window.App || (window.App = {});
         + '</div>';
       }
 
-      var todoOk = est.sunat && est.credenciales && est.api;
+      var todoOk = est.sunat && est.credenciales && est.sol && est.api;
       var hora = est.hora ? est.hora.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '';
 
       return '<div style="margin-bottom: 1.25rem; padding: 1rem; border-radius: 0.875rem; background: ' + SUPERFICIE + ';">'
@@ -310,6 +311,8 @@ var App = window.App || (window.App = {});
           + fila(est.sunat, est.sunat ? 'SUNAT responde' : 'SUNAT no responde', est.url)
           + fila(est.credenciales, est.credenciales ? 'Credenciales completas' : 'Credenciales incompletas',
               est.credenciales ? '' : 'Falta el nombre de la aplicación, el Id o la Clave.')
+          + fila(est.sol, est.sol ? 'Acceso SOL completo' : 'Acceso SOL incompleto',
+              est.sol ? 'RUC ' + est.solRuc + ' · usuario ' + est.solUsuario : 'Falta el RUC (11 dígitos), el usuario SOL o la Clave SOL.')
           + fila(est.api, est.api ? 'API de facturación conectada' : 'API de facturación sin conexión',
               est.api ? '' : est.apiError)
         + '</div>'
@@ -346,6 +349,15 @@ var App = window.App || (window.App = {});
           + '<div class="cfg-grid" style="margin-top: 0.875rem;">'
             + this._campo('Id (client_id)', '<input id="s-sunat-id" class="input font-mono" value="' + App.escapeHtml(s.client_id || '') + '" placeholder="Id que entrega SUNAT" autocomplete="off" />')
             + this._campo('Clave (client_secret)', '<input id="s-sunat-secret" type="password" class="input font-mono" value="' + App.escapeHtml(s.client_secret || '') + '" placeholder="Clave que entrega SUNAT" autocomplete="off" />')
+          + '</div>'
+
+          + '<div class="cfg-grid" style="margin-top: 1.25rem; padding-top: 1.25rem; border-top: 1px solid rgb(241 245 249);">'
+            + this._campo('RUC', '<input id="s-sol-ruc" class="input font-mono" value="' + App.escapeHtml(c.sunat_ruc || '') + '" maxlength="11" inputmode="numeric" placeholder="20607827410" autocomplete="off" />')
+            + this._campo('Usuario SOL', '<input id="s-sol-usuario" class="input font-mono" value="' + App.escapeHtml(c.sunat_usuario_sol || '') + '" placeholder="Usuario SOL" autocomplete="off" />')
+          + '</div>'
+          + '<div class="cfg-grid" style="margin-top: 0.875rem;">'
+            + this._campo('Clave SOL', '<input id="s-sol-clave" type="password" class="input font-mono" value="' + App.escapeHtml(c.sunat_clave_sol || '') + '" placeholder="Clave SOL" autocomplete="new-password" />',
+                'Se guarda solo en este navegador.')
           + '</div>'
 
           + '<div class="cfg-grid" style="margin-top: 1.25rem; padding-top: 1.25rem; border-top: 1px solid rgb(241 245 249);">'
@@ -726,6 +738,15 @@ var App = window.App || (window.App = {});
       var jp = c.querySelector('#s-jsonpe-token');
       if (jp) jp.addEventListener('input', function (e) { self.config.jsonpe_token = e.target.value; });
 
+      // Acceso SOL (RUC, usuario, clave)
+      [['#s-sol-ruc', 'sunat_ruc'], ['#s-sol-usuario', 'sunat_usuario_sol'], ['#s-sol-clave', 'sunat_clave_sol']].forEach(function (par) {
+        var el = c.querySelector(par[0]);
+        if (!el) return;
+        el.addEventListener('input', function (e) {
+          self.config[par[1]] = par[1] === 'sunat_ruc' ? e.target.value.replace(/\D/g, '') : e.target.value;
+        });
+      });
+
       // URL json.pe
       var jpu = c.querySelector('#s-jsonpe-url');
       if (jpu) jpu.addEventListener('input', function (e) { self.config.jsonpe_url = e.target.value; });
@@ -820,6 +841,18 @@ var App = window.App || (window.App = {});
       // La URL siempre es la de SUNAT: si se deja vacía, se usa la oficial
       this.sunat.app_url = this._urlSunat();
 
+      // 0) Acceso SOL: el RUC, si se ingresó, debe tener 11 dígitos
+      var ruc = String(this.config.sunat_ruc || '').trim();
+      if (ruc && !/^\d{11}$/.test(ruc)) {
+        this.saved = false;
+        this.msgConexion = { tipo: 'error', texto: 'El RUC debe tener 11 dígitos.' };
+        this._rerender();
+        return;
+      }
+      this.config.sunat_ruc = ruc;
+      this.config.sunat_usuario_sol = String(this.config.sunat_usuario_sol || '').trim();
+      this.config.sunat_clave_sol = String(this.config.sunat_clave_sol || '');
+
       // 1) Credenciales SUNAT: se validan y se guardan
       try {
         App.api.guardarCredencialesSunat(this.sunat);
@@ -886,10 +919,18 @@ var App = window.App || (window.App = {});
         jsonpe: false,
         jsonpeUrl: '',
         jsonpeToken: false,
+        sol: false,
+        solRuc: '',
+        solUsuario: '',
         credenciales: !!(String(s.app_nombre || '').trim() && String(s.client_id || '').trim() && String(s.client_secret || '').trim()),
         api: false,
         apiError: '',
       };
+
+      // 0) Acceso SOL: RUC de 11 dígitos, usuario y clave presentes
+      estado.solRuc = String(this.config.sunat_ruc || '').trim();
+      estado.solUsuario = String(this.config.sunat_usuario_sol || '').trim();
+      estado.sol = /^\d{11}$/.test(estado.solRuc) && !!estado.solUsuario && !!String(this.config.sunat_clave_sol || '');
 
       // 1) SUNAT
       estado.sunat = await this._pingSunat(url);
