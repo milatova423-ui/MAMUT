@@ -2,7 +2,8 @@ var App = window.App || (window.App = {});
 
 /**
  * Configuración en tres pasos:
- *   1. Conexión  — credenciales de la API SUNAT (lo primero que hay que poner).
+ *   1. Conexión  — credenciales de la aplicación registrada en SUNAT (Menú SOL):
+ *                  nombre, URL, Id y Clave.
  *   2. Mi empresa — datos reales traídos de GET /empresa, editables con
  *      PUT /empresa, más logo (POST /empresa/logo) y certificado
  *      (POST /empresa/certificado).
@@ -21,7 +22,7 @@ var App = window.App || (window.App = {});
   var ERROR = 'rgb(190 40 40)';
 
   var TABS = [
-    { id: 'conexion', label: 'Conexión', desc: 'Credenciales de la API' },
+    { id: 'conexion', label: 'Conexión', desc: 'Credenciales de SUNAT' },
     { id: 'empresa', label: 'Mi empresa', desc: 'Datos, logo y certificado' },
     { id: 'sistema', label: 'Sistema', desc: 'Catálogo y respaldo' },
   ];
@@ -64,9 +65,11 @@ var App = window.App || (window.App = {});
 
       // Conexión
       this.config = App.getConfig();
+      this.sunat = App.api.getCredencialesSunat(); // { app_nombre, app_url, client_id, client_secret }
       this.saved = false;
       this.testing = false;
       this.testResult = null;
+      this.msgConexion = null;
 
       // Empresa (API)
       this.empresa = null;
@@ -121,7 +124,7 @@ var App = window.App || (window.App = {});
 
     /** ¿Ese paso ya está resuelto? Se marca con un check en la navegación. */
     _completado(id) {
-      if (id === 'conexion') return App.isConfigured();
+      if (id === 'conexion') return App.api.credencialesSunatConfiguradas() || App.isConfigured();
       if (id === 'empresa') return !!this.empresa;
       return App.DB.all('productos').length > 0;
     }
@@ -230,25 +233,26 @@ var App = window.App || (window.App = {});
         + '</div>';
     }
 
-    // ═══ 1. Conexión ══════════════════════════════════════════
+    // ═══ 1. Conexión (SUNAT) ══════════════════════════════════
     _tabConexionHTML() {
+      var s = this.sunat;
       var c = this.config;
-      var listo = !!(c.api_key && c.api_secret);
 
       return ''
         + '<div class="card">'
-          + '<h2 class="section-title"><i data-lucide="key-round" class="w-5 h-5"></i> Credenciales de la API</h2>'
+          + '<h2 class="section-title"><i data-lucide="key-round" class="w-5 h-5"></i> Credenciales de SUNAT</h2>'
           + '<p class="text-xs" style="color: rgb(71 85 105); line-height: 1.6; margin-bottom: 1.25rem;">'
-            + 'Es lo primero que hay que configurar: sin esto el sistema no puede emitir ni leer los datos de tu empresa.'
+            + 'Datos de la aplicación registrada en SUNAT: Menú SOL → Empresas → Credenciales de API SUNAT.'
           + '</p>'
 
-          + this._campo('URL base de la API',
-              '<input id="s-base-url" class="input" value="' + App.escapeHtml(c.base_url || '') + '" placeholder="https://apisunatv2.kodevo.es/api/v1" />',
-              'Sin barra al final.')
+          + '<div class="cfg-grid">'
+            + this._campo('Nombre de la aplicación', '<input id="s-sunat-app-nombre" class="input" value="' + App.escapeHtml(s.app_nombre || '') + '" placeholder="SIST_FACT E" />')
+            + this._campo('URL de la aplicación', '<input id="s-sunat-app-url" class="input" value="' + App.escapeHtml(s.app_url || '') + '" placeholder="https://mamut-one.vercel.app/" />')
+          + '</div>'
 
           + '<div class="cfg-grid" style="margin-top: 0.875rem;">'
-            + this._campo('X-Api-Key', '<input id="s-api-key" class="input font-mono" value="' + App.escapeHtml(c.api_key || '') + '" placeholder="Tu api_key de 64 caracteres" />')
-            + this._campo('X-Api-Secret', '<input id="s-api-secret" type="password" class="input font-mono" value="' + App.escapeHtml(c.api_secret || '') + '" placeholder="Tu api_secret" />')
+            + this._campo('Id (client_id)', '<input id="s-sunat-id" class="input font-mono" value="' + App.escapeHtml(s.client_id || '') + '" placeholder="Id que entrega SUNAT" autocomplete="off" />')
+            + this._campo('Clave (client_secret)', '<input id="s-sunat-secret" type="password" class="input font-mono" value="' + App.escapeHtml(s.client_secret || '') + '" placeholder="Clave que entrega SUNAT" autocomplete="off" />')
           + '</div>'
 
           + '<div style="margin-top: 1.25rem; padding-top: 1.25rem; border-top: 1px solid rgb(241 245 249);">'
@@ -257,13 +261,10 @@ var App = window.App || (window.App = {});
                 'Se usa para autocompletar clientes y proveedores desde SUNAT y RENIEC.')
           + '</div>'
 
+          + this._msgHTML(this.msgConexion)
+
           + '<div class="cfg-acciones" style="margin-top: 1.25rem; align-items: center;">'
             + '<button id="s-save" class="btn-primary"><i data-lucide="save" class="w-4 h-4"></i> Guardar</button>'
-            + '<button id="s-test" class="btn-secondary" ' + ((this.testing || !listo) ? 'disabled' : '') + '>'
-              + (this.testing
-                ? '<i data-lucide="loader-2" class="w-4 h-4 icon-spin"></i> Probando...'
-                : '<i data-lucide="plug" class="w-4 h-4"></i> Probar conexión')
-            + '</button>'
             + (this.saved
               ? '<span style="font-size: 0.8125rem; font-weight: 600; color: rgb(22 163 74); display: inline-flex; align-items: center; gap: 0.25rem;">'
                 + '<i data-lucide="check-circle-2" class="w-4 h-4"></i> Guardado</span>'
@@ -610,19 +611,25 @@ var App = window.App || (window.App = {});
       var self = this;
       var c = this.container;
 
-      [['#s-base-url', 'base_url'], ['#s-api-key', 'api_key'],
-       ['#s-api-secret', 'api_secret'], ['#s-jsonpe-token', 'jsonpe_token']].forEach(function (par) {
+      // Credenciales SUNAT
+      [['#s-sunat-app-nombre', 'app_nombre'], ['#s-sunat-app-url', 'app_url'],
+       ['#s-sunat-id', 'client_id'], ['#s-sunat-secret', 'client_secret']].forEach(function (par) {
         var el = c.querySelector(par[0]);
         if (!el) return;
         el.addEventListener('input', function (e) {
-          self.config[par[1]] = e.target.value;
-          var test = c.querySelector('#s-test');
-          if (test) test.disabled = self.testing || !self.config.api_key || !self.config.api_secret;
+          self.sunat[par[1]] = e.target.value;
         });
       });
 
-      c.querySelector('#s-save').addEventListener('click', function () { self._guardarConfig(); });
-      c.querySelector('#s-test').addEventListener('click', function () { self._probar(); });
+      // Token json.pe
+      var jp = c.querySelector('#s-jsonpe-token');
+      if (jp) jp.addEventListener('input', function (e) { self.config.jsonpe_token = e.target.value; });
+
+      var save = c.querySelector('#s-save');
+      if (save) save.addEventListener('click', function () { self._guardarConfig(); });
+
+      var test = c.querySelector('#s-test');
+      if (test) test.addEventListener('click', function () { self._probar(); });
 
       var irEmpresa = c.querySelector('#s-ir-empresa');
       if (irEmpresa) irEmpresa.addEventListener('click', function () {
@@ -704,7 +711,23 @@ var App = window.App || (window.App = {});
     // ═══ Acciones: conexión ═══════════════════════════════════
     _guardarConfig() {
       var self = this;
+
+      // 1) Credenciales SUNAT: se validan y se guardan
+      try {
+        App.api.guardarCredencialesSunat(this.sunat);
+      } catch (e) {
+        this.saved = false;
+        this.msgConexion = { tipo: 'error', texto: e.message };
+        this._rerender();
+        return;
+      }
+
+      // 2) Se reflejan también en la configuración general
+      this.config.sunat_client_id = String(this.sunat.client_id || '').trim();
+      this.config.sunat_client_secret = String(this.sunat.client_secret || '').trim();
       App.saveConfig(this.config);
+
+      this.msgConexion = null;
       this.saved = true;
       this._rerender();
       setTimeout(function () {
