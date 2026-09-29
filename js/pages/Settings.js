@@ -3,9 +3,7 @@ var App = window.App || (window.App = {});
 /**
  * Configuración en tres pasos:
  *   1. Conexión  — credenciales de la aplicación registrada en SUNAT (Menú SOL):
- *                  nombre, URL de SUNAT, Id y Clave, más el acceso con RUC,
- *                  usuario SOL y Clave SOL. Muestra el ESTADO de la conexión
- *                  (SUNAT alcanzable, credenciales, acceso SOL, API de facturación).
+ *                  nombre, URL, Id y Clave.
  *   2. Mi empresa — datos reales traídos de GET /empresa, editables con
  *      PUT /empresa, más logo (POST /empresa/logo) y certificado
  *      (POST /empresa/certificado).
@@ -22,12 +20,6 @@ var App = window.App || (window.App = {});
   var TENUE = 'rgb(148 163 184)';
   var OK = 'rgb(22 163 74)';
   var ERROR = 'rgb(190 40 40)';
-
-  // URL de SUNAT (servidor de seguridad / token de la API SUNAT)
-  var SUNAT_URL = 'https://api-seguridad.sunat.gob.pe/v1';
-
-  // URL de api.json.pe (consulta RUC / DNI)
-  var JSONPE_URL = 'https://api.json.pe';
 
   var TABS = [
     { id: 'conexion', label: 'Conexión', desc: 'Credenciales de SUNAT' },
@@ -74,18 +66,10 @@ var App = window.App || (window.App = {});
       // Conexión
       this.config = App.getConfig();
       this.sunat = App.api.getCredencialesSunat(); // { app_nombre, app_url, client_id, client_secret }
-      // La URL debe ser la de SUNAT: si estaba vacía o apuntaba a otro sitio, se corrige
-      if (!/sunat\.gob\.pe/i.test(String(this.sunat.app_url || ''))) {
-        this.sunat.app_url = SUNAT_URL;
-      }
       this.saved = false;
       this.testing = false;
       this.testResult = null;
       this.msgConexion = null;
-
-      // Estado de la conexión: null = sin verificar
-      // { sunat: bool, credenciales: bool, api: bool, apiError: string, url: string, hora: Date }
-      this.estadoConexion = null;
 
       // Empresa (API)
       this.empresa = null;
@@ -107,10 +91,6 @@ var App = window.App || (window.App = {});
       this._renderHTML();
       this._bind();
       if (App.isConfigured()) this._cargarEmpresa();
-      // Al abrir se verifica lo básico. El inicio de sesión real en SUNAT NO se
-      // dispara solo: se hace al pulsar «Probar conexión» o «Guardar», para no
-      // acumular intentos con una Clave SOL que quizá aún esté mal escrita.
-      this._probar(false);
     }
 
     _rerender() {
@@ -120,19 +100,6 @@ var App = window.App || (window.App = {});
 
     // ═══ Estructura ═══════════════════════════════════════════
     _renderHTML() {
-      try {
-        this._renderHTMLInterno();
-      } catch (e) {
-        console.error('[Configuración] error al dibujar la pantalla', e);
-        this.container.innerHTML = '<div class="card" style="margin-top: 1rem;">'
-          + '<h2 class="section-title" style="color: ' + ERROR + ';">No se pudo mostrar la configuración</h2>'
-          + '<p class="text-xs" style="color: ' + TEXTO2 + '; line-height: 1.6;">Error: <strong>' + App.escapeHtml(e && e.message ? e.message : String(e)) + '</strong></p>'
-          + '<p class="text-xs" style="color: ' + TEXTO2 + '; margin-top: 0.5rem;">Recarga con Ctrl + F5. Si sigue igual, abre F12 → Consola y copia el error rojo.</p>'
-          + '</div>';
-      }
-    }
-
-    _renderHTMLInterno() {
       var self = this;
 
       this.container.innerHTML = ''
@@ -267,84 +234,6 @@ var App = window.App || (window.App = {});
     }
 
     // ═══ 1. Conexión (SUNAT) ══════════════════════════════════
-    _urlSunat() {
-      return String(this.sunat.app_url || '').trim() || SUNAT_URL;
-    }
-
-    _urlJsonpe() {
-      return String(this.config.jsonpe_url || '').trim() || JSONPE_URL;
-    }
-
-    /**
-     * Panel de estado: dice si HAY o NO conexión. Tres comprobaciones:
-     *   - SUNAT alcanzable (la URL responde desde este navegador)
-     *   - Credenciales SUNAT completas (nombre, Id y Clave)
-     *   - API de facturación (GET /empresa responde con las credenciales guardadas)
-     */
-    _estadoConexionHTML() {
-      var est = this.estadoConexion;
-
-      function fila(ok, titulo, detalle) {
-        return '<div style="display: flex; align-items: flex-start; gap: 0.5rem; font-size: 0.8125rem; line-height: 1.5;">'
-          + '<i data-lucide="' + (ok === null ? 'circle' : ok ? 'check-circle-2' : 'x-circle') + '" class="w-4 h-4" style="color: ' + (ok === null ? TENUE : ok ? OK : ERROR) + '; flex-shrink: 0; margin-top: 0.15rem;"></i>'
-          + '<div style="min-width: 0;">'
-            + '<strong style="color: ' + TEXTO + ';">' + titulo + '</strong>'
-            + (detalle ? '<div style="color: ' + TEXTO2 + '; word-break: break-word;">' + App.escapeHtml(detalle) + '</div>' : '')
-          + '</div>'
-        + '</div>';
-      }
-
-      // Probando
-      if (this.testing) {
-        return '<div style="margin-bottom: 1.25rem; padding: 0.875rem 1rem; border-radius: 0.875rem; background: ' + SUPERFICIE + '; display: flex; align-items: center; gap: 0.625rem;">'
-          + '<i data-lucide="loader-2" class="w-5 h-5 icon-spin" style="color: ' + TENUE + ';"></i>'
-          + '<span style="font-size: 0.875rem; font-weight: 700; color: ' + TEXTO + ';">Verificando conexión con SUNAT...</span>'
-        + '</div>';
-      }
-
-      // Aún sin verificar
-      if (!est) {
-        return '<div style="margin-bottom: 1.25rem; padding: 0.875rem 1rem; border-radius: 0.875rem; background: ' + SUPERFICIE + '; display: flex; align-items: center; gap: 0.625rem;">'
-          + '<span style="width: 0.6rem; height: 0.6rem; border-radius: 9999px; background: ' + TENUE + '; flex-shrink: 0;"></span>'
-          + '<span style="font-size: 0.875rem; font-weight: 700; color: ' + TEXTO + ';">Sin verificar</span>'
-          + '<span style="font-size: 0.8125rem; color: ' + TEXTO2 + ';">Pulsa «Probar conexión».</span>'
-        + '</div>';
-      }
-
-      var todoOk = est.sunat && est.credenciales && est.sol && !!(est.login && est.login.ok) && est.api;
-      var hora = est.hora ? est.hora.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '';
-
-      return '<div style="margin-bottom: 1.25rem; padding: 1rem; border-radius: 0.875rem; background: ' + SUPERFICIE + ';">'
-        + '<div style="display: flex; align-items: center; gap: 0.625rem; flex-wrap: wrap;">'
-          + '<span style="width: 0.6rem; height: 0.6rem; border-radius: 9999px; background: ' + (todoOk ? OK : ERROR) + '; flex-shrink: 0;"></span>'
-          + '<span style="font-size: 0.9375rem; font-weight: 800; color: ' + TEXTO + ';">'
-            + (todoOk ? 'Conectado' : 'Sin conexión completa')
-          + '</span>'
-          + (hora ? '<span style="font-size: 0.75rem; color: ' + TENUE + '; margin-left: auto;">Verificado a las ' + hora + '</span>' : '')
-        + '</div>'
-        + '<div style="margin-top: 0.75rem; display: flex; flex-direction: column; gap: 0.5rem;">'
-          + fila(est.sunat, est.sunat ? 'SUNAT responde' : 'SUNAT no responde', est.url)
-          + fila(est.credenciales, est.credenciales ? 'Credenciales completas' : 'Credenciales incompletas',
-              est.credenciales ? '' : 'Falta el nombre de la aplicación, el Id o la Clave.')
-          + fila(est.sol, est.sol ? 'Acceso SOL completo' : 'Acceso SOL incompleto',
-              est.sol ? 'RUC ' + est.solRuc + ' · usuario ' + est.solUsuario : 'Falta el RUC (11 dígitos), el usuario SOL o la Clave SOL.')
-          + fila(est.login ? est.login.ok : null,
-              est.login ? (est.login.ok ? 'Inicio de sesión en SUNAT correcto' : 'SUNAT no aceptó el acceso') : 'Acceso a SUNAT sin probar',
-              est.login ? est.login.texto : 'Pulsa «Probar conexión» para validar RUC, usuario SOL, Clave SOL, Id y Clave.')
-          + fila(est.api, est.api ? 'API de facturación conectada' : 'API de facturación sin conexión',
-              est.api ? '' : est.apiError)
-        + '</div>'
-        + '<div style="margin-top: 0.875rem; padding-top: 0.875rem; border-top: 1px solid rgb(226 232 240);">'
-          + '<div style="font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em; color: ' + TENUE + '; margin-bottom: 0.5rem;">Consulta RUC / DNI</div>'
-          + '<div style="display: flex; flex-direction: column; gap: 0.5rem;">'
-            + fila(est.jsonpe, est.jsonpe ? 'api.json.pe responde' : 'api.json.pe no responde', est.jsonpeUrl)
-            + fila(est.jsonpeToken, est.jsonpeToken ? 'Token cargado' : 'Falta el token',
-                est.jsonpeToken ? '' : 'Ingresa el Bearer token de api.json.pe.')
-          + '</div>'
-        + '</div>'
-      + '</div>';
-    }
-
     _tabConexionHTML() {
       var s = this.sunat;
       var c = this.config;
@@ -356,12 +245,9 @@ var App = window.App || (window.App = {});
             + 'Datos de la aplicación registrada en SUNAT: Menú SOL → Empresas → Credenciales de API SUNAT.'
           + '</p>'
 
-          + this._estadoConexionHTML()
-
           + '<div class="cfg-grid">'
             + this._campo('Nombre de la aplicación', '<input id="s-sunat-app-nombre" class="input" value="' + App.escapeHtml(s.app_nombre || '') + '" placeholder="SIST_FACT E" />')
-            + this._campo('URL de SUNAT', '<input id="s-sunat-app-url" class="input font-mono" value="' + App.escapeHtml(this._urlSunat()) + '" placeholder="' + SUNAT_URL + '" />',
-                'Dirección de SUNAT contra la que se verifica la conexión.')
+            + this._campo('URL de la aplicación', '<input id="s-sunat-app-url" class="input" value="' + App.escapeHtml(s.app_url || '') + '" placeholder="https://mamut-one.vercel.app/" />')
           + '</div>'
 
           + '<div class="cfg-grid" style="margin-top: 0.875rem;">'
@@ -369,20 +255,8 @@ var App = window.App || (window.App = {});
             + this._campo('Clave (client_secret)', '<input id="s-sunat-secret" type="password" class="input font-mono" value="' + App.escapeHtml(s.client_secret || '') + '" placeholder="Clave que entrega SUNAT" autocomplete="off" />')
           + '</div>'
 
-          + '<div class="cfg-grid" style="margin-top: 1.25rem; padding-top: 1.25rem; border-top: 1px solid rgb(241 245 249);">'
-            + this._campo('RUC', '<input id="s-sol-ruc" class="input font-mono" value="' + App.escapeHtml(c.sunat_ruc || '') + '" maxlength="11" inputmode="numeric" placeholder="20607827410" autocomplete="off" />')
-            + this._campo('Usuario SOL', '<input id="s-sol-usuario" class="input font-mono" value="' + App.escapeHtml(c.sunat_usuario_sol || '') + '" placeholder="Usuario SOL" autocomplete="off" />')
-          + '</div>'
-          + '<div class="cfg-grid" style="margin-top: 0.875rem;">'
-            + this._campo('Clave SOL', '<input id="s-sol-clave" type="password" class="input font-mono" value="' + App.escapeHtml(c.sunat_clave_sol || '') + '" placeholder="Clave SOL" autocomplete="new-password" />',
-                'Se guarda solo en este navegador.')
-          + '</div>'
-
-          + '<div class="cfg-grid" style="margin-top: 1.25rem; padding-top: 1.25rem; border-top: 1px solid rgb(241 245 249);">'
-            + this._campo('URL de api.json.pe <span style="color: rgb(148 163 184); font-weight: 400;">(consulta RUC / DNI)</span>',
-                '<input id="s-jsonpe-url" class="input font-mono" value="' + App.escapeHtml(this._urlJsonpe()) + '" placeholder="' + JSONPE_URL + '" />',
-                'Dirección contra la que se verifica la conexión.')
-            + this._campo('Token de api.json.pe',
+          + '<div style="margin-top: 1.25rem; padding-top: 1.25rem; border-top: 1px solid rgb(241 245 249);">'
+            + this._campo('Token de api.json.pe <span style="color: rgb(148 163 184); font-weight: 400;">(consulta RUC / DNI)</span>',
                 '<input id="s-jsonpe-token" type="password" class="input font-mono" value="' + App.escapeHtml(c.jsonpe_token || '') + '" placeholder="Bearer token de api.json.pe" />',
                 'Se usa para autocompletar clientes y proveedores desde SUNAT y RENIEC.')
           + '</div>'
@@ -391,11 +265,6 @@ var App = window.App || (window.App = {});
 
           + '<div class="cfg-acciones" style="margin-top: 1.25rem; align-items: center;">'
             + '<button id="s-save" class="btn-primary"><i data-lucide="save" class="w-4 h-4"></i> Guardar</button>'
-            + '<button id="s-test" class="btn-secondary" ' + (this.testing ? 'disabled' : '') + '>'
-              + (this.testing
-                ? '<i data-lucide="loader-2" class="w-4 h-4 icon-spin"></i> Probando...'
-                : '<i data-lucide="plug-zap" class="w-4 h-4"></i> Probar conexión')
-            + '</button>'
             + (this.saved
               ? '<span style="font-size: 0.8125rem; font-weight: 600; color: rgb(22 163 74); display: inline-flex; align-items: center; gap: 0.25rem;">'
                 + '<i data-lucide="check-circle-2" class="w-4 h-4"></i> Guardado</span>'
@@ -720,14 +589,6 @@ var App = window.App || (window.App = {});
 
     // ═══ Eventos ══════════════════════════════════════════════
     _bind() {
-      try {
-        this._bindInterno();
-      } catch (e) {
-        console.error('[Configuración] error al activar los botones', e);
-      }
-    }
-
-    _bindInterno() {
       var self = this;
       var c = this.container;
 
@@ -764,24 +625,11 @@ var App = window.App || (window.App = {});
       var jp = c.querySelector('#s-jsonpe-token');
       if (jp) jp.addEventListener('input', function (e) { self.config.jsonpe_token = e.target.value; });
 
-      // Acceso SOL (RUC, usuario, clave)
-      [['#s-sol-ruc', 'sunat_ruc'], ['#s-sol-usuario', 'sunat_usuario_sol'], ['#s-sol-clave', 'sunat_clave_sol']].forEach(function (par) {
-        var el = c.querySelector(par[0]);
-        if (!el) return;
-        el.addEventListener('input', function (e) {
-          self.config[par[1]] = par[1] === 'sunat_ruc' ? e.target.value.replace(/\D/g, '') : e.target.value;
-        });
-      });
-
-      // URL json.pe
-      var jpu = c.querySelector('#s-jsonpe-url');
-      if (jpu) jpu.addEventListener('input', function (e) { self.config.jsonpe_url = e.target.value; });
-
       var save = c.querySelector('#s-save');
       if (save) save.addEventListener('click', function () { self._guardarConfig(); });
 
       var test = c.querySelector('#s-test');
-      if (test) test.addEventListener('click', function () { self._probar(true); });
+      if (test) test.addEventListener('click', function () { self._probar(); });
 
       var irEmpresa = c.querySelector('#s-ir-empresa');
       if (irEmpresa) irEmpresa.addEventListener('click', function () {
@@ -864,21 +712,6 @@ var App = window.App || (window.App = {});
     _guardarConfig() {
       var self = this;
 
-      // La URL siempre es la de SUNAT: si se deja vacía, se usa la oficial
-      this.sunat.app_url = this._urlSunat();
-
-      // 0) Acceso SOL: el RUC, si se ingresó, debe tener 11 dígitos
-      var ruc = String(this.config.sunat_ruc || '').trim();
-      if (ruc && !/^\d{11}$/.test(ruc)) {
-        this.saved = false;
-        this.msgConexion = { tipo: 'error', texto: 'El RUC debe tener 11 dígitos.' };
-        this._rerender();
-        return;
-      }
-      this.config.sunat_ruc = ruc;
-      this.config.sunat_usuario_sol = String(this.config.sunat_usuario_sol || '').trim();
-      this.config.sunat_clave_sol = String(this.config.sunat_clave_sol || '');
-
       // 1) Credenciales SUNAT: se validan y se guardan
       try {
         App.api.guardarCredencialesSunat(this.sunat);
@@ -892,7 +725,6 @@ var App = window.App || (window.App = {});
       // 2) Se reflejan también en la configuración general
       this.config.sunat_client_id = String(this.sunat.client_id || '').trim();
       this.config.sunat_client_secret = String(this.sunat.client_secret || '').trim();
-      this.config.jsonpe_url = this._urlJsonpe();
       App.saveConfig(this.config);
 
       this.msgConexion = null;
@@ -903,151 +735,24 @@ var App = window.App || (window.App = {});
         self.saved = false;
         self._rerender();
       }, 2000);
-
-      // Tras guardar, se verifica todo (incluido el inicio de sesión en SUNAT)
-      this._probar(true);
     }
 
-    /**
-     * ¿Responde SUNAT? Desde el navegador SUNAT no permite leer la respuesta
-     * (CORS), así que se hace una petición "no-cors": si el servidor contesta,
-     * la promesa se resuelve; si no hay red, el dominio no existe o tarda más
-     * de 8 segundos, se rechaza.
-     */
-    async _pingSunat(url) {
-      var ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
-      var timer = setTimeout(function () { if (ctrl) ctrl.abort(); }, 8000);
-      try {
-        await fetch(url, { mode: 'no-cors', cache: 'no-store', signal: ctrl ? ctrl.signal : undefined });
-        return true;
-      } catch (e) {
-        return false;
-      } finally {
-        clearTimeout(timer);
-      }
-    }
-
-    /**
-     * Inicio de sesión REAL en SUNAT, hecho por la función de servidor
-     * /api/sunat-token (el navegador no puede hacerlo por CORS).
-     */
-    async _validarLoginSunat() {
-      var s = this.sunat;
-      var c = this.config;
-      var ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
-      var timer = setTimeout(function () { if (ctrl) ctrl.abort(); }, 20000);
-      try {
-        var r = await fetch('/api/sunat-token', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            client_id: String(s.client_id || '').trim(),
-            client_secret: String(s.client_secret || '').trim(),
-            ruc: String(c.sunat_ruc || '').trim(),
-            usuario: String(c.sunat_usuario_sol || '').trim(),
-            clave: String(c.sunat_clave_sol || ''),
-          }),
-          signal: ctrl ? ctrl.signal : undefined,
-        });
-        if (r.status === 404) {
-          return { ok: false, texto: 'Falta publicar la función del servidor /api/sunat-token (archivo api/sunat-token.js).' };
-        }
-        var d = null;
-        try { d = await r.json(); } catch (e) { d = null; }
-        if (!d) return { ok: false, texto: 'Respuesta inválida del servidor (código ' + r.status + ').' };
-        if (d.ok) {
-          return { ok: true, texto: 'SUNAT aceptó el RUC, el usuario SOL, la Clave SOL y las credenciales de la aplicación.' };
-        }
-        return { ok: false, texto: d.error || 'SUNAT rechazó el acceso.' };
-      } catch (e) {
-        return { ok: false, texto: e && e.name === 'AbortError'
-          ? 'El servidor tardó demasiado en responder.'
-          : 'No se pudo contactar la función del servidor: ' + e.message };
-      } finally {
-        clearTimeout(timer);
-      }
-    }
-
-    /** Verifica SUNAT, las credenciales y la API de facturación, y lo muestra. */
-    async _probar(completo) {
-      try {
-        await this._probarInterno(completo);
-      } catch (e) {
-        console.error('[Configuración] error al probar la conexión', e);
-        this.testing = false;
-        if (this.container && this.container.isConnected) this._rerender();
-      }
-    }
-
-    async _probarInterno(completo) {
-      if (this.testing) return;
-
+    async _probar() {
       App.saveConfig(this.config);
       this.testing = true;
       this.testResult = null;
       this._rerender();
 
-      var url = this._urlSunat();
-      var s = this.sunat;
-      var estado = {
-        url: url,
-        hora: new Date(),
-        sunat: false,
-        jsonpe: false,
-        jsonpeUrl: '',
-        jsonpeToken: false,
-        login: null,
-        sol: false,
-        solRuc: '',
-        solUsuario: '',
-        credenciales: !!(String(s.app_nombre || '').trim() && String(s.client_id || '').trim() && String(s.client_secret || '').trim()),
-        api: false,
-        apiError: '',
-      };
-
-      // 0) Acceso SOL: RUC de 11 dígitos, usuario y clave presentes
-      estado.solRuc = String(this.config.sunat_ruc || '').trim();
-      estado.solUsuario = String(this.config.sunat_usuario_sol || '').trim();
-      estado.sol = /^\d{11}$/.test(estado.solRuc) && !!estado.solUsuario && !!String(this.config.sunat_clave_sol || '');
-
-      // 0b) Inicio de sesión real en SUNAT (solo al pulsar Probar / Guardar)
-      var previo = this.estadoConexion && this.estadoConexion.login ? this.estadoConexion.login : null;
-      if (completo) {
-        estado.login = (estado.credenciales && estado.sol)
-          ? await this._validarLoginSunat()
-          : { ok: false, texto: 'Completa primero las credenciales de la aplicación y el acceso SOL.' };
-      } else {
-        estado.login = previo;
+      try {
+        var res = await App.api.getEmpresa();
+        this.testResult = { success: true, empresa: res.data || {} };
+        this._recibirEmpresa(res.data);
+      } catch (e) {
+        this.testResult = { success: false, error: e.message };
+      } finally {
+        this.testing = false;
+        this._rerender();
       }
-
-      // 1) SUNAT
-      estado.sunat = await this._pingSunat(url);
-
-      // 1b) api.json.pe: servidor alcanzable + token cargado
-      estado.jsonpeUrl = this._urlJsonpe();
-      estado.jsonpeToken = !!String(this.config.jsonpe_token || '').trim();
-      estado.jsonpe = await this._pingSunat(estado.jsonpeUrl);
-
-      // 2) API de facturación (solo si ya hay api_key / api_secret)
-      if (!App.isConfigured()) {
-        estado.apiError = 'Falta ingresar la api_key y el api_secret de la API.';
-      } else {
-        try {
-          var res = await App.api.getEmpresa();
-          estado.api = true;
-          this.testResult = { success: true, empresa: res.data || {} };
-          this._recibirEmpresa(res.data);
-        } catch (e) {
-          estado.apiError = /failed to fetch/i.test(String(e.message))
-            ? 'El navegador no pudo comunicarse con la API (' + (App.getConfig().base_url || 'base_url sin definir') + '). Puede ser dirección incorrecta, bloqueo CORS o falta de red. Abre F12 → Consola para ver el motivo exacto.'
-            : e.message;
-          this.testResult = { success: false, error: e.message };
-        }
-      }
-
-      this.estadoConexion = estado;
-      this.testing = false;
-      if (this.container && this.container.isConnected) this._rerender();
     }
 
     // ═══ Acciones: empresa ════════════════════════════════════
