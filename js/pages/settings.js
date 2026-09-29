@@ -64,6 +64,9 @@ var App = window.App || (window.App = {});
 
       // Conexión
       this.config = App.getConfig();
+      // Ingreso directo con SUNAT (vía función /api/sunat-token en Vercel)
+      this.config.sunat_token_url = this.config.sunat_token_url || (window.location.origin + '/api/sunat-token');
+      this.config.jsonpe_url = this.config.jsonpe_url || 'https://api.json.pe';
       this.saved = false;
       this.testing = false;
       this.testResult = null;
@@ -121,7 +124,7 @@ var App = window.App || (window.App = {});
 
     /** ¿Ese paso ya está resuelto? Se marca con un check en la navegación. */
     _completado(id) {
-      if (id === 'conexion') return App.isConfigured();
+      if (id === 'conexion') return !!(this.config.sunat_ok || App.isConfigured());
       if (id === 'empresa') return !!this.empresa;
       return App.DB.all('productos').length > 0;
     }
@@ -233,28 +236,29 @@ var App = window.App || (window.App = {});
     // ═══ 1. Conexión ══════════════════════════════════════════
     _tabConexionHTML() {
       var c = this.config;
-      var listo = !!(c.api_key && c.api_secret);
+      var listo = !!c.sunat_token_url;
 
       return ''
         + '<div class="card">'
-          + '<h2 class="section-title"><i data-lucide="key-round" class="w-5 h-5"></i> Credenciales de la API</h2>'
+          + '<h2 class="section-title"><i data-lucide="key-round" class="w-5 h-5"></i> Ingreso con SUNAT</h2>'
           + '<p class="text-xs" style="color: rgb(71 85 105); line-height: 1.6; margin-bottom: 1.25rem;">'
-            + 'Es lo primero que hay que configurar: sin esto el sistema no puede emitir ni leer los datos de tu empresa.'
+            + 'El Id y la Clave de SUNAT viven en el servidor (variables de entorno de Vercel), no aquí. '
+            + 'Este botón comprueba que el servidor logre obtener el token de SUNAT.'
           + '</p>'
 
-          + this._campo('URL base de la API',
-              '<input id="s-base-url" class="input" value="' + App.escapeHtml(c.base_url || '') + '" placeholder="https://apisunatv2.kodevo.es/api/v1" />',
-              'Sin barra al final.')
-
-          + '<div class="cfg-grid" style="margin-top: 0.875rem;">'
-            + this._campo('X-Api-Key', '<input id="s-api-key" class="input font-mono" value="' + App.escapeHtml(c.api_key || '') + '" placeholder="Tu api_key de 64 caracteres" />')
-            + this._campo('X-Api-Secret', '<input id="s-api-secret" type="password" class="input font-mono" value="' + App.escapeHtml(c.api_secret || '') + '" placeholder="Tu api_secret" />')
-          + '</div>'
+          + this._campo('URL de la función de token SUNAT',
+              '<input id="s-sunat-url" class="input font-mono" value="' + App.escapeHtml(c.sunat_token_url || '') + '" placeholder="https://mamut-one.vercel.app/api/sunat-token" />',
+              'Es el archivo api/sunat-token.js desplegado en Vercel.')
 
           + '<div style="margin-top: 1.25rem; padding-top: 1.25rem; border-top: 1px solid rgb(241 245 249);">'
-            + this._campo('Token de api.json.pe <span style="color: rgb(148 163 184); font-weight: 400;">(consulta RUC / DNI)</span>',
-                '<input id="s-jsonpe-token" type="password" class="input font-mono" value="' + App.escapeHtml(c.jsonpe_token || '') + '" placeholder="Bearer token de api.json.pe" />',
-                'Se usa para autocompletar clientes y proveedores desde SUNAT y RENIEC.')
+            + '<div class="cfg-grid">'
+              + this._campo('URL de api.json.pe',
+                  '<input id="s-jsonpe-url" class="input font-mono" value="' + App.escapeHtml(c.jsonpe_url || '') + '" placeholder="https://api.json.pe" />',
+                  'Sin barra al final.')
+              + this._campo('Token de api.json.pe <span style="color: rgb(148 163 184); font-weight: 400;">(consulta RUC / DNI)</span>',
+                  '<input id="s-jsonpe-token" type="password" class="input font-mono" value="' + App.escapeHtml(c.jsonpe_token || '') + '" placeholder="Bearer token de api.json.pe" />',
+                  'Se usa para autocompletar clientes y proveedores desde SUNAT y RENIEC.')
+            + '</div>'
           + '</div>'
 
           + '<div class="cfg-acciones" style="margin-top: 1.25rem; align-items: center;">'
@@ -262,7 +266,7 @@ var App = window.App || (window.App = {});
             + '<button id="s-test" class="btn-secondary" ' + ((this.testing || !listo) ? 'disabled' : '') + '>'
               + (this.testing
                 ? '<i data-lucide="loader-2" class="w-4 h-4 icon-spin"></i> Probando...'
-                : '<i data-lucide="plug" class="w-4 h-4"></i> Probar conexión')
+                : '<i data-lucide="plug" class="w-4 h-4"></i> Ingresar con SUNAT')
             + '</button>'
             + (this.saved
               ? '<span style="font-size: 0.8125rem; font-weight: 600; color: rgb(22 163 74); display: inline-flex; align-items: center; gap: 0.25rem;">'
@@ -277,19 +281,17 @@ var App = window.App || (window.App = {});
     _testResultHTML() {
       if (!this.testResult) return '';
       if (this.testResult.success) {
-        var e = this.testResult.empresa || {};
+        var mins = Math.round((this.testResult.expires_in || 0) / 60);
         return ''
           + '<div style="margin-top: 1rem; padding: 1rem; border-radius: 0.875rem; background: ' + SUPERFICIE + ';">'
             + '<div style="font-weight: 700; color: ' + TEXTO + '; display: flex; align-items: center; gap: 0.5rem;">'
-              + '<i data-lucide="check-circle-2" class="w-5 h-5" style="color: ' + OK + ';"></i> Conexión exitosa'
+              + '<i data-lucide="check-circle-2" class="w-5 h-5" style="color: ' + OK + ';"></i> Ingreso con SUNAT exitoso'
             + '</div>'
             + '<div style="margin-top: 0.625rem; font-size: 0.8125rem; color: ' + TEXTO2 + '; line-height: 1.7;">'
-              + '<div><strong style="color: ' + TEXTO + ';">' + App.escapeHtml(primero(e, ['razon_social', 'nombre_comercial']) || '—') + '</strong></div>'
-              + '<div>RUC ' + App.escapeHtml(e.ruc || '—') + ' · Plan ' + App.escapeHtml(unir(e.plan) || '—') + ' · Entorno ' + App.escapeHtml(e.entorno || '—') + '</div>'
+              + 'SUNAT entregó un token válido' + (mins ? ' por ' + mins + ' minutos' : '') + '.'
             + '</div>'
             + '<div class="cfg-acciones" style="margin-top: 0.875rem;">'
-              + '<button id="s-ir-empresa" class="btn-primary text-sm">Ver datos de mi empresa <i data-lucide="arrow-right" class="w-4 h-4"></i></button>'
-              + '<button id="s-goto-dashboard" class="btn-secondary text-sm">Ir al inicio</button>'
+              + '<button id="s-goto-dashboard" class="btn-primary text-sm">Ir al inicio</button>'
             + '</div>'
           + '</div>';
       }
@@ -610,14 +612,14 @@ var App = window.App || (window.App = {});
       var self = this;
       var c = this.container;
 
-      [['#s-base-url', 'base_url'], ['#s-api-key', 'api_key'],
-       ['#s-api-secret', 'api_secret'], ['#s-jsonpe-token', 'jsonpe_token']].forEach(function (par) {
+      [['#s-sunat-url', 'sunat_token_url'], ['#s-jsonpe-url', 'jsonpe_url'],
+       ['#s-jsonpe-token', 'jsonpe_token']].forEach(function (par) {
         var el = c.querySelector(par[0]);
         if (!el) return;
         el.addEventListener('input', function (e) {
           self.config[par[1]] = e.target.value;
           var test = c.querySelector('#s-test');
-          if (test) test.disabled = self.testing || !self.config.api_key || !self.config.api_secret;
+          if (test) test.disabled = self.testing || !self.config.sunat_token_url;
         });
       });
 
@@ -721,10 +723,17 @@ var App = window.App || (window.App = {});
       this._rerender();
 
       try {
-        var res = await App.api.getEmpresa();
-        this.testResult = { success: true, empresa: res.data || {} };
-        this._recibirEmpresa(res.data);
+        var r = await fetch(this.config.sunat_token_url, { method: 'POST' });
+        var data = await r.json().catch(function () { return {}; });
+        if (!r.ok || !data.ok) {
+          throw new Error(data.error || ('Error ' + r.status + ' al contactar la función de SUNAT'));
+        }
+        this.config.sunat_ok = true;
+        App.saveConfig(this.config);
+        this.testResult = { success: true, expires_in: data.expires_in };
       } catch (e) {
+        this.config.sunat_ok = false;
+        App.saveConfig(this.config);
         this.testResult = { success: false, error: e.message };
       } finally {
         this.testing = false;
