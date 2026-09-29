@@ -65,7 +65,11 @@ var App = window.App || (window.App = {});
       // Conexión
       this.config = App.getConfig();
       // Ingreso directo con SUNAT (vía función /api/sunat-token en Vercel)
-      this.config.sunat_token_url = '/api/sunat-token';
+      var uSunat = this.config.sunat_token_url;
+      if (!uSunat || uSunat.indexOf('sunat-token') === -1) uSunat = '/api/sunat-token';
+      this.config.sunat_token_url = uSunat;
+      if (this.config.sunat_activo === undefined) this.config.sunat_activo = true;
+      if (this.config.jsonpe_activo === undefined) this.config.jsonpe_activo = true;
       this.config.jsonpe_url = this.config.jsonpe_url || 'https://api.json.pe';
       this.saved = false;
       this.testing = false;
@@ -237,24 +241,42 @@ var App = window.App || (window.App = {});
     }
 
     // ═══ 1. Conexión ══════════════════════════════════════════
+    /** Interruptor "aceptar / no aceptar" (casilla con texto). */
+    _interruptorHTML(id, activo, texto, ayuda) {
+      return '<div style="margin-top: 1rem; padding: 0.875rem 1rem; border-radius: 0.875rem; background: ' + SUPERFICIE + ';">'
+        + '<label style="display: flex; align-items: center; gap: 0.625rem; cursor: pointer; font-size: 0.875rem; font-weight: 700; color: ' + TEXTO + ';">'
+          + '<input id="' + id + '" type="checkbox" ' + (activo ? 'checked' : '') + ' style="width: 1.1rem; height: 1.1rem; accent-color: ' + PRIMARIO + ';" />'
+          + texto
+          + '<span style="margin-left: auto; font-size: 0.75rem; font-weight: 700; color: ' + (activo ? OK : TENUE) + ';">' + (activo ? 'ACTIVADO' : 'DESACTIVADO') + '</span>'
+        + '</label>'
+        + '<p class="text-xs" style="color: rgb(100 116 139); margin-top: 0.375rem; margin-left: 1.725rem;">' + ayuda + '</p>'
+      + '</div>';
+    }
+
     _tabConexionHTML() {
       var c = this.config;
-      var listo = true;
+      var sunatOn = c.sunat_activo !== false;
+      var jsonOn = c.jsonpe_activo !== false;
 
-      return ''
+      // ── Tarjeta 1: SUNAT ──
+      var sunat = ''
         + '<div class="card">'
           + '<h2 class="section-title"><i data-lucide="key-round" class="w-5 h-5"></i> Ingreso con SUNAT</h2>'
-          + '<p class="text-xs" style="color: rgb(71 85 105); line-height: 1.6; margin-bottom: 1.25rem;">'
+          + '<p class="text-xs" style="color: rgb(71 85 105); line-height: 1.6; margin-bottom: 1rem;">'
             + 'Ingresa tu RUC, usuario y clave SOL, y el Id y Clave de la aplicación registrada en SUNAT. '
             + 'El botón comprueba que SUNAT entregue el token.'
           + '</p>'
 
-          + '<div class="cfg-acciones" style="margin-bottom: 1rem; align-items: center;">'
+          + this._interruptorHTML('s-sunat-activo', sunatOn, 'Aceptar conexión con SUNAT',
+              'Si lo desactivas, el sistema no se conecta a SUNAT.')
+
+          + '<div class="cfg-acciones" style="margin: 1rem 0; align-items: center;">'
             + '<button id="s-cargar" type="button" class="btn-secondary text-sm"><i data-lucide="upload" class="w-4 h-4"></i> Cargar credenciales</button>'
             + '<button id="s-plantilla" type="button" class="btn-secondary text-sm"><i data-lucide="download" class="w-4 h-4"></i> Descargar plantilla</button>'
             + '<input id="s-cargar-file" type="file" accept=".json,application/json" style="display: none;" />'
             + (this.cargaMsg ? '<span style="font-size: 0.8125rem; font-weight: 600; color: ' + (this.cargaMsg.tipo === 'ok' ? OK : ERROR) + ';">' + App.escapeHtml(this.cargaMsg.texto) + '</span>' : '')
           + '</div>'
+
           + '<div class="cfg-grid">'
             + this._campo('RUC', '<input id="s-ruc" class="input font-mono" maxlength="11" value="' + App.escapeHtml(c.ruc || '') + '" placeholder="11 dígitos" />')
             + this._campo('Usuario SOL', '<input id="s-usuario-sol" class="input font-mono" autocomplete="off" value="' + App.escapeHtml(c.usuario_sol || '') + '" placeholder="Ej: MODDATOS" />', 'Es el usuario, no el RUC. Se une al RUC automáticamente.')
@@ -265,20 +287,18 @@ var App = window.App || (window.App = {});
             + this._campo('Clave de la API SUNAT', '<input id="s-client-secret" type="password" class="input font-mono" autocomplete="new-password" value="' + App.escapeHtml(c.client_secret || '') + '" placeholder="Clave de la aplicación" />')
           + '</div>'
 
-          + '<div style="margin-top: 1.25rem; padding-top: 1.25rem; border-top: 1px solid rgb(241 245 249);">'
-            + '<div class="cfg-grid">'
-              + this._campo('URL de api.json.pe',
-                  '<input id="s-jsonpe-url" class="input font-mono" value="' + App.escapeHtml(c.jsonpe_url || '') + '" placeholder="https://api.json.pe" />',
-                  'Sin barra al final.')
-              + this._campo('Token de api.json.pe <span style="color: rgb(148 163 184); font-weight: 400;">(consulta RUC / DNI)</span>',
-                  '<input id="s-jsonpe-token" type="password" class="input font-mono" value="' + App.escapeHtml(c.jsonpe_token || '') + '" placeholder="Bearer token de api.json.pe" />',
-                  'Se usa para autocompletar clientes y proveedores desde SUNAT y RENIEC.')
-            + '</div>'
+          + '<div style="margin-top: 0.875rem;">'
+            + this._campo('URL de la función SUNAT (servidor)',
+                '<div style="display: flex; gap: 0.5rem;">'
+                  + '<input id="s-sunat-url" class="input font-mono" style="flex: 1;" value="' + App.escapeHtml(c.sunat_token_url || '') + '" placeholder="/api/sunat-token" />'
+                  + '<button id="s-sunat-reset" type="button" class="btn-secondary text-sm" title="Volver al valor por defecto">Restablecer</button>'
+                + '</div>',
+                'Por defecto <strong>/api/sunat-token</strong> (el archivo api/sunat-token.js de tu proyecto en Vercel). No pongas aquí páginas de SUNAT.')
           + '</div>'
 
           + '<div class="cfg-acciones" style="margin-top: 1.25rem; align-items: center;">'
             + '<button id="s-save" class="btn-primary"><i data-lucide="save" class="w-4 h-4"></i> Guardar</button>'
-            + '<button id="s-test" class="btn-secondary" ' + ((this.testing || !listo) ? 'disabled' : '') + '>'
+            + '<button id="s-test" class="btn-secondary" ' + ((this.testing || !sunatOn) ? 'disabled' : '') + '>'
               + (this.testing
                 ? '<i data-lucide="loader-2" class="w-4 h-4 icon-spin"></i> Probando...'
                 : '<i data-lucide="plug" class="w-4 h-4"></i> Ingresar con SUNAT')
@@ -291,6 +311,39 @@ var App = window.App || (window.App = {});
 
           + this._testResultHTML()
         + '</div>';
+
+      // ── Tarjeta 2: api.json.pe ──
+      var json = ''
+        + '<div class="card" style="margin-top: 1rem;">'
+          + '<h2 class="section-title"><i data-lucide="search" class="w-5 h-5"></i> api.json.pe <span style="font-weight: 400; color: ' + TENUE + '; font-size: 0.8125rem;">(consulta RUC / DNI)</span></h2>'
+          + '<p class="text-xs" style="color: rgb(71 85 105); line-height: 1.6; margin-bottom: 1rem;">'
+            + 'Se usa para autocompletar clientes y proveedores desde SUNAT y RENIEC. Es independiente del ingreso con SUNAT.'
+          + '</p>'
+
+          + this._interruptorHTML('s-jsonpe-activo', jsonOn, 'Aceptar consultas con api.json.pe',
+              'Si lo desactivas, no se autocompletan datos por RUC o DNI.')
+
+          + '<div class="cfg-grid" style="margin-top: 1rem;">'
+            + this._campo('URL de api.json.pe',
+                '<div style="display: flex; gap: 0.5rem;">'
+                  + '<input id="s-jsonpe-url" class="input font-mono" style="flex: 1;" value="' + App.escapeHtml(c.jsonpe_url || '') + '" placeholder="https://api.json.pe" />'
+                  + '<button id="s-jsonpe-reset" type="button" class="btn-secondary text-sm" title="Volver al valor por defecto">Restablecer</button>'
+                + '</div>',
+                'Sin barra al final.')
+            + this._campo('Token de api.json.pe',
+                '<input id="s-jsonpe-token" type="password" class="input font-mono" value="' + App.escapeHtml(c.jsonpe_token || '') + '" placeholder="Bearer token de api.json.pe" />')
+          + '</div>'
+
+          + '<div class="cfg-acciones" style="margin-top: 1.25rem; align-items: center;">'
+            + '<button id="s-save2" class="btn-primary"><i data-lucide="save" class="w-4 h-4"></i> Guardar</button>'
+            + (this.saved
+              ? '<span style="font-size: 0.8125rem; font-weight: 600; color: rgb(22 163 74); display: inline-flex; align-items: center; gap: 0.25rem;">'
+                + '<i data-lucide="check-circle-2" class="w-4 h-4"></i> Guardado</span>'
+              : '')
+          + '</div>'
+        + '</div>';
+
+      return sunat + json;
     }
 
     // ═══ Certificado digital (.pfx) ═══════════════════════════
@@ -674,7 +727,7 @@ var App = window.App || (window.App = {});
       var self = this;
       var c = this.container;
 
-      [['#s-ruc', 'ruc'], ['#s-usuario-sol', 'usuario_sol'], ['#s-clave-sol', 'clave_sol'],
+      [['#s-sunat-url', 'sunat_token_url'], ['#s-ruc', 'ruc'], ['#s-usuario-sol', 'usuario_sol'], ['#s-clave-sol', 'clave_sol'],
        ['#s-client-id', 'client_id'], ['#s-client-secret', 'client_secret'],
         ['#s-jsonpe-url', 'jsonpe_url'],
        ['#s-jsonpe-token', 'jsonpe_token']].forEach(function (par) {
@@ -688,6 +741,22 @@ var App = window.App || (window.App = {});
       });
 
       c.querySelector('#s-save').addEventListener('click', function () { self._guardarConfig(); });
+      var save2 = c.querySelector('#s-save2');
+      if (save2) save2.addEventListener('click', function () { self._guardarConfig(); });
+
+      [['#s-sunat-activo', 'sunat_activo'], ['#s-jsonpe-activo', 'jsonpe_activo']].forEach(function (par) {
+        var el = c.querySelector(par[0]);
+        if (!el) return;
+        el.addEventListener('change', function (e) {
+          self.config[par[1]] = e.target.checked;
+          App.saveConfig(self.config);
+          self._rerender();
+        });
+      });
+      var rs = c.querySelector('#s-sunat-reset');
+      if (rs) rs.addEventListener('click', function () { self.config.sunat_token_url = '/api/sunat-token'; self._rerender(); });
+      var rj = c.querySelector('#s-jsonpe-reset');
+      if (rj) rj.addEventListener('click', function () { self.config.jsonpe_url = 'https://api.json.pe'; self._rerender(); });
 
       var fileIn = c.querySelector('#s-cargar-file');
       c.querySelector('#s-cargar').addEventListener('click', function () { fileIn.click(); });
@@ -946,6 +1015,7 @@ var App = window.App || (window.App = {});
     }
 
     async _probar() {
+      if (this.config.sunat_activo === false) return;
       App.saveConfig(this.config);
       this.testing = true;
       this.testResult = null;
@@ -953,7 +1023,7 @@ var App = window.App || (window.App = {});
 
       try {
         var cf = this.config;
-        var r = await fetch('/api/sunat-token', {
+        var r = await fetch(cf.sunat_token_url || '/api/sunat-token', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -963,7 +1033,9 @@ var App = window.App || (window.App = {});
         });
         var data = await r.json().catch(function () { return {}; });
         if (!r.ok || !data.ok) {
-          throw new Error(data.error || ('Error ' + r.status + ' al contactar la función de SUNAT'));
+          throw new Error(data.error || (r.status === 404
+            ? 'Error 404: la función no existe en el servidor. Sube api/sunat-token.js a la raíz de tu repositorio y espera el deploy en Vercel.'
+            : 'Error ' + r.status + ' al contactar la función de SUNAT'));
         }
         this.config.sunat_ok = true;
         App.saveConfig(this.config);
