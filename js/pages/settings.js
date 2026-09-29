@@ -114,7 +114,7 @@ var App = window.App || (window.App = {});
           + this._navHTML()
 
           + '<div style="margin-top: 1.25rem;">'
-            + (this.tab === 'conexion' ? this._tabConexionHTML() + this._certificadoHTML()
+            + (this.tab === 'conexion' ? this._tabConexionHTML() + this._certPfxHTML()
               : this.tab === 'empresa' ? this._tabEmpresaHTML()
               : this._tabSistemaHTML())
           + '</div>'
@@ -294,7 +294,7 @@ var App = window.App || (window.App = {});
     }
 
     // ═══ Certificado digital (.pfx) ═══════════════════════════
-    _certificadoHTML() {
+    _certPfxHTML() {
       var c = this.config;
       var info = c.cert_info;
       var msg = this.certMsg;
