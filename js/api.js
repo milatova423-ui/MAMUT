@@ -1,6 +1,67 @@
 var App = window.App || (window.App = {});
 
 (function () {
+  // ─── Credenciales SUNAT (Menú SOL → Registro de aplicación) ─────────────
+  // Id y Clave que entrega SUNAT al registrar la aplicación (client_id / client_secret).
+  // Se guardan en el navegador (localStorage). Si en App.getConfig() existen
+  // sunat_client_id / sunat_client_secret, esos valores tienen prioridad.
+  var SUNAT_STORAGE_KEY = 'mamut_sunat_credenciales';
+
+  function leerSunatGuardado() {
+    try {
+      var raw = window.localStorage.getItem(SUNAT_STORAGE_KEY);
+      return raw ? JSON.parse(raw) : {};
+    } catch (e) {
+      return {};
+    }
+  }
+
+  function getCredencialesSunat() {
+    var cfg = (App.getConfig && App.getConfig()) || {};
+    var saved = leerSunatGuardado();
+    return {
+      app_nombre: saved.app_nombre || '',
+      app_url: saved.app_url || '',
+      client_id: cfg.sunat_client_id || saved.client_id || '',
+      client_secret: cfg.sunat_client_secret || saved.client_secret || '',
+      fecha_registro: saved.fecha_registro || '',
+    };
+  }
+
+  function guardarCredencialesSunat(data) {
+    data = data || {};
+    var clientId = String(data.client_id || '').trim();
+    var clientSecret = String(data.client_secret || '').trim();
+
+    if (!clientId) throw new Error('Falta el Id de la aplicación SUNAT.');
+    if (!clientSecret) throw new Error('Falta la Clave de la aplicación SUNAT.');
+
+    var toSave = {
+      app_nombre: String(data.app_nombre || '').trim(),
+      app_url: String(data.app_url || '').trim(),
+      client_id: clientId,
+      client_secret: clientSecret,
+      fecha_registro: String(data.fecha_registro || '').trim(),
+    };
+
+    try {
+      window.localStorage.setItem(SUNAT_STORAGE_KEY, JSON.stringify(toSave));
+    } catch (e) {
+      throw new Error('No se pudo guardar las credenciales SUNAT en el navegador.');
+    }
+    return { success: true, data: toSave };
+  }
+
+  function borrarCredencialesSunat() {
+    try { window.localStorage.removeItem(SUNAT_STORAGE_KEY); } catch (e) {}
+    return { success: true };
+  }
+
+  function credencialesSunatConfiguradas() {
+    var c = getCredencialesSunat();
+    return !!(c.client_id && c.client_secret);
+  }
+
   // ─── API json.pe — consulta RUC / DNI ─────────────────
   async function buscarDocumentoExterno(tipo, numero) {
     var token = App.getConfig().jsonpe_token;
@@ -125,6 +186,12 @@ var App = window.App || (window.App = {});
   }
 
   App.api = {
+    // ─── Credenciales SUNAT (aplicación registrada en Menú SOL) ─────
+    getCredencialesSunat: getCredencialesSunat,
+    guardarCredencialesSunat: guardarCredencialesSunat,
+    borrarCredencialesSunat: borrarCredencialesSunat,
+    credencialesSunatConfiguradas: credencialesSunatConfiguradas,
+
     // ─── Empresa (01. Configuración inicial) ───────────────────
     getEmpresa: function () { return request('GET', '/empresa'); },
     actualizarEmpresa: function (data) { return request('PUT', '/empresa', data); },
