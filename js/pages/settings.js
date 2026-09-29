@@ -242,13 +242,25 @@ var App = window.App || (window.App = {});
         + '<div class="card">'
           + '<h2 class="section-title"><i data-lucide="key-round" class="w-5 h-5"></i> Ingreso con SUNAT</h2>'
           + '<p class="text-xs" style="color: rgb(71 85 105); line-height: 1.6; margin-bottom: 1.25rem;">'
-            + 'El Id y la Clave de SUNAT viven en el servidor (variables de entorno de Vercel), no aquí. '
-            + 'Este botón comprueba que el servidor logre obtener el token de SUNAT.'
+            + 'Ingresa tu RUC, usuario y clave SOL, y el Id y Clave de la aplicación registrada en SUNAT. '
+            + 'El botón comprueba que SUNAT entregue el token.'
           + '</p>'
 
+          + '<div class="cfg-grid">'
+            + this._campo('RUC', '<input id="s-ruc" class="input font-mono" maxlength="11" value="' + App.escapeHtml(c.ruc || '') + '" placeholder="11 dígitos" />')
+            + this._campo('Usuario SOL', '<input id="s-usuario-sol" class="input font-mono" autocomplete="off" value="' + App.escapeHtml(c.usuario_sol || '') + '" placeholder="Ej: MODDATOS" />', 'Es el usuario, no el RUC. Se une al RUC automáticamente.')
+            + this._campo('Clave SOL', '<input id="s-clave-sol" type="password" class="input font-mono" autocomplete="new-password" value="' + App.escapeHtml(c.clave_sol || '') + '" placeholder="Tu clave SOL" />')
+          + '</div>'
+          + '<div class="cfg-grid" style="margin-top: 0.875rem;">'
+            + this._campo('Id de la API SUNAT', '<input id="s-client-id" class="input font-mono" autocomplete="off" value="' + App.escapeHtml(c.client_id || '') + '" placeholder="e89e00c9-264e-..." />', 'Menú SOL → Registro de su aplicación.')
+            + this._campo('Clave de la API SUNAT', '<input id="s-client-secret" type="password" class="input font-mono" autocomplete="new-password" value="' + App.escapeHtml(c.client_secret || '') + '" placeholder="Clave de la aplicación" />')
+          + '</div>'
+
+          + '<div style="margin-top: 0.875rem;">'
           + this._campo('URL de la función de token SUNAT',
               '<input id="s-sunat-url" class="input font-mono" value="' + App.escapeHtml(c.sunat_token_url || '') + '" placeholder="https://mamut-one.vercel.app/api/sunat-token" />',
               'Es el archivo api/sunat-token.js desplegado en Vercel.')
+          + '</div>'
 
           + '<div style="margin-top: 1.25rem; padding-top: 1.25rem; border-top: 1px solid rgb(241 245 249);">'
             + '<div class="cfg-grid">'
@@ -612,7 +624,9 @@ var App = window.App || (window.App = {});
       var self = this;
       var c = this.container;
 
-      [['#s-sunat-url', 'sunat_token_url'], ['#s-jsonpe-url', 'jsonpe_url'],
+      [['#s-ruc', 'ruc'], ['#s-usuario-sol', 'usuario_sol'], ['#s-clave-sol', 'clave_sol'],
+       ['#s-client-id', 'client_id'], ['#s-client-secret', 'client_secret'],
+       ['#s-sunat-url', 'sunat_token_url'], ['#s-jsonpe-url', 'jsonpe_url'],
        ['#s-jsonpe-token', 'jsonpe_token']].forEach(function (par) {
         var el = c.querySelector(par[0]);
         if (!el) return;
@@ -723,7 +737,15 @@ var App = window.App || (window.App = {});
       this._rerender();
 
       try {
-        var r = await fetch(this.config.sunat_token_url, { method: 'POST' });
+        var cf = this.config;
+        var r = await fetch(cf.sunat_token_url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            ruc: cf.ruc, usuario_sol: cf.usuario_sol, clave_sol: cf.clave_sol,
+            client_id: cf.client_id, client_secret: cf.client_secret,
+          }),
+        });
         var data = await r.json().catch(function () { return {}; });
         if (!r.ok || !data.ok) {
           throw new Error(data.error || ('Error ' + r.status + ' al contactar la función de SUNAT'));
