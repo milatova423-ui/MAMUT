@@ -28,11 +28,16 @@
 // Las credenciales entran normalmente: NO se devuelve error por credenciales faltantes
 // ni "credencial API inválida".
 //
+//   servicio = 'menu'    -> Entrada a la plataforma SUNAT Menú SOL (e-menu.sunat.gob.pe)
+//                          Devuelve la URL del Menú SOL para abrirla desde la app
+//                          (no pide token; el inicio de sesión lo haces tú en la página de SUNAT)
+//
 // GET  -> comprueba que la función existe e indica qué credenciales hay en el servidor (sin valores)
 // POST -> body JSON opcional: { servicio?, ruc, usuario_sol, clave_sol, client_id, client_secret, scope? }
 
 const SCOPE_CPE = 'https://api-cpe.sunat.gob.pe';
 const SCOPE_VALIDEZ = 'https://api.sunat.gob.pe/v1/contribuyente/contribuyentes';
+const MENU_SOL_URL = 'https://e-menu.sunat.gob.pe/cl-ti-itmenu/MenuInternet.htm?pestana=*&agrupacion=*';
 
 module.exports = async function handler(req, res) {
   const origin = req.headers.origin || '*';
@@ -48,7 +53,8 @@ module.exports = async function handler(req, res) {
     return res.status(200).json({
       ok: true,
       mensaje: 'Función sunat-token activa. Usa POST para pedir el token.',
-      servicios: ['cpe', 'validez'],
+      servicios: ['cpe', 'validez', 'menu'],
+      menu_url: MENU_SOL_URL,
       configuradas: {
         SUNAT_RUC: hay('SUNAT_RUC'),
         SUNAT_USER_SOL: hay('SUNAT_USER_SOL'),
@@ -72,6 +78,17 @@ module.exports = async function handler(req, res) {
 
   // Determinar el servicio
   let servicio = String(b.servicio || b.service || '').trim().toLowerCase();
+
+  // Entrada a SUNAT Menú SOL: devuelve la URL de la plataforma para abrirla desde la app
+  if (servicio === 'menu') {
+    return res.status(200).json({
+      ok: true,
+      servicio: 'menu',
+      url: MENU_SOL_URL,
+      menu_url: MENU_SOL_URL,
+    });
+  }
+
   if (servicio !== 'cpe' && servicio !== 'validez') {
     if (/contribuyente/i.test(scopeEnviado)) servicio = 'validez';
     else {
@@ -125,6 +142,7 @@ module.exports = async function handler(req, res) {
     return res.status(200).json({
       ok: true,
       servicio,
+      menu_url: MENU_SOL_URL,
       access_token: data.access_token || null,
       token_type: data.token_type || null,
       expires_in: data.expires_in || null,
@@ -134,6 +152,7 @@ module.exports = async function handler(req, res) {
     return res.status(200).json({
       ok: true,
       servicio,
+      menu_url: MENU_SOL_URL,
       access_token: null,
       token_type: null,
       expires_in: null,
