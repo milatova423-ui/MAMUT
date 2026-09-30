@@ -1029,7 +1029,14 @@ var App = window.App || (window.App = {});
 
       try {
         var cf = this.config;
-        var r = await fetch(cf.sunat_token_url || '/api/sunat-token', {
+        var urlFn = cf.sunat_token_url || '/api/sunat-token';
+        // Solo se acepta ruta relativa o del mismo dominio (nunca páginas de Vercel o SUNAT)
+        var okUrl = true;
+        if (/^https?:\/\//i.test(urlFn)) {
+          try { okUrl = new URL(urlFn).origin === window.location.origin; } catch (e2) { okUrl = false; }
+        }
+        if (!okUrl || urlFn.indexOf('sunat-token') === -1) { urlFn = '/api/sunat-token'; cf.sunat_token_url = urlFn; }
+        var r = await fetch(urlFn, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
