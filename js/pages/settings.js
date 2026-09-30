@@ -363,6 +363,7 @@ var App = window.App || (window.App = {});
             + '<div class="cfg-acciones" style="margin: 1rem 0; align-items: center;">'
             + '<button id="s-cargar" type="button" class="btn-secondary text-sm"><i data-lucide="upload" class="w-4 h-4"></i> Cargar credenciales</button>'
             + '<button id="s-plantilla" type="button" class="btn-secondary text-sm"><i data-lucide="download" class="w-4 h-4"></i> Descargar plantilla</button>'
+            + '<button id="s-vaciar" type="button" class="btn-secondary text-sm"><i data-lucide="eraser" class="w-4 h-4"></i> Vaciar campos</button>'
             + '<input id="s-cargar-file" type="file" accept=".json,application/json" style="display: none;" />'
             + (this.cargaMsg ? '<span style="font-size: 0.8125rem; font-weight: 600; color: ' + (this.cargaMsg.tipo === 'ok' ? OK : ERROR) + ';">' + App.escapeHtml(this.cargaMsg.texto) + '</span>' : '')
           + '</div>'
@@ -834,6 +835,14 @@ var App = window.App || (window.App = {});
       });
 
       c.querySelector('#s-save').addEventListener('click', function () { self._guardarConfig(); });
+      var vaciar = c.querySelector('#s-vaciar');
+      if (vaciar) vaciar.addEventListener('click', function () {
+        ['ruc', 'usuario_sol', 'clave_sol', 'client_id', 'client_secret'].forEach(function (k) { delete self.config[k]; });
+        App.saveConfig(self.config);
+        self.detOpen = true;
+        self.cargaMsg = { tipo: 'ok', texto: 'Campos vaciados. Ahora se usan las credenciales de Vercel.' };
+        self._rerender();
+      });
       var verif = c.querySelector('#s-srv-verificar');
       if (verif) verif.addEventListener('click', function () { self.srvEstado = 'cargando'; self._rerender(); self._verificarServidor(); });
       var det = c.querySelector('#s-det');
