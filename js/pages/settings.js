@@ -382,6 +382,14 @@ var App = window.App || (window.App = {});
           + '</details>'
 
           + '<div style="margin-top: 0.875rem;">'
+            + this._campo('Servicio de SUNAT al que se conecta',
+                '<select id="s-scope" class="input">'
+                  + '<option value="https://api-cpe.sunat.gob.pe"' + ((c.sunat_scope || 'https://api-cpe.sunat.gob.pe') === 'https://api-cpe.sunat.gob.pe' ? ' selected' : '') + '>Guías de remisión y comprobantes (api-cpe)</option>'
+                  + '<option value="https://api.sunat.gob.pe/v1/contribuyente/contribuyentes"' + (c.sunat_scope === 'https://api.sunat.gob.pe/v1/contribuyente/contribuyentes' ? ' selected' : '') + '>Consulta de validez de comprobantes</option>'
+                + '</select>',
+                'Debe coincidir con la API para la que registraste la aplicación en SOL.')
+          + '</div>'
+          + '<div style="margin-top: 0.875rem;">'
             + this._campo('URL de la función SUNAT (servidor)',
                 '<div style="display: flex; gap: 0.5rem;">'
                   + '<input id="s-sunat-url" class="input font-mono" style="flex: 1;" value="' + App.escapeHtml(c.sunat_token_url || '') + '" placeholder="/api/sunat-token" />'
@@ -835,6 +843,8 @@ var App = window.App || (window.App = {});
       });
 
       c.querySelector('#s-save').addEventListener('click', function () { self._guardarConfig(); });
+      var scopeSel = c.querySelector('#s-scope');
+      if (scopeSel) scopeSel.addEventListener('change', function (e) { self.config.sunat_scope = e.target.value; App.saveConfig(self.config); });
       var vaciar = c.querySelector('#s-vaciar');
       if (vaciar) vaciar.addEventListener('click', function () {
         ['ruc', 'usuario_sol', 'clave_sol', 'client_id', 'client_secret'].forEach(function (k) { delete self.config[k]; });
@@ -1137,6 +1147,7 @@ var App = window.App || (window.App = {});
           body: JSON.stringify({
             ruc: cf.ruc, usuario_sol: cf.usuario_sol, clave_sol: cf.clave_sol,
             client_id: cf.client_id, client_secret: cf.client_secret,
+            scope: cf.sunat_scope || 'https://api-cpe.sunat.gob.pe',
           }),
         });
         var data = await r.json().catch(function () { return {}; });
