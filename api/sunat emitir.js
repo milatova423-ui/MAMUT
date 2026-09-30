@@ -1,4 +1,4 @@
-// api/sunat-emitir.js  (Función serverless, va en /api/sunat-emitir.js junto a sunat-token.js)
+// api/sunat-emitir.js  (Función serverless, va en /api/sunat-emitir.js)
 //
 // Emite BOLETAS (03) y FACTURAS (01) a SUNAT por el sistema SEE - Del Contribuyente:
 //   1) Arma el XML UBL 2.1
