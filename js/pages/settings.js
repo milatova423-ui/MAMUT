@@ -2,7 +2,8 @@ var App = window.App || (window.App = {});
 
 /**
  * Configuración en tres pasos:
- *   1. Conexión  — credenciales de la API SUNAT (lo primero que hay que poner).
+ *   1. Conexión  — credenciales de la API SUNAT (lo primero que hay que poner),
+ *      entrada al Menú SOL, certificado digital y emisión de boletas/facturas.
  *   2. Mi empresa — datos reales traídos de GET /empresa, editables con
  *      PUT /empresa, más logo (POST /empresa/logo) y certificado
  *      (POST /empresa/certificado).
@@ -19,6 +20,9 @@ var App = window.App || (window.App = {});
   var TENUE = 'rgb(148 163 184)';
   var OK = 'rgb(22 163 74)';
   var ERROR = 'rgb(190 40 40)';
+
+  // [NUEVO] Plataforma SUNAT Menú SOL
+  var MENU_SOL_URL = 'https://e-menu.sunat.gob.pe/cl-ti-itmenu/MenuInternet.htm?pestana=*&agrupacion=*';
 
   var TABS = [
     { id: 'conexion', label: 'Conexión', desc: 'Credenciales de la API' },
@@ -64,7 +68,7 @@ var App = window.App || (window.App = {});
 
       // Conexión
       this.config = App.getConfig();
-      // Ingreso directo con SUNAT (vía función /api/sunat-token en Vercel)
+      // Ingreso directo con SUNAT (vía función /api/sunat-token en GitHub)
       var uSunat = this.config.sunat_token_url;
       if (!uSunat || uSunat.indexOf('sunat-token') === -1) uSunat = '/api/sunat-token';
       if (/^https?:\/\//i.test(uSunat)) {
@@ -77,6 +81,18 @@ var App = window.App || (window.App = {});
       if (this.config.sunat_activo === undefined) this.config.sunat_activo = true;
       if (this.config.jsonpe_activo === undefined) this.config.jsonpe_activo = true;
       this.config.jsonpe_url = this.config.jsonpe_url || 'https://api.json.pe';
+
+      // [NUEVO] Emisión de boletas y facturas (función /api/sunat-emitir)
+      if (!this.config.emision_url || this.config.emision_url.indexOf('sunat-emitir') === -1) this.config.emision_url = '/api/sunat-emitir';
+      if (/^https?:\/\//i.test(this.config.emision_url)) {
+        var mismoE = false;
+        try { mismoE = new URL(this.config.emision_url).origin === window.location.origin; } catch (e2) { mismoE = false; }
+        if (!mismoE) this.config.emision_url = '/api/sunat-emitir';
+      }
+      if (this.config.emision_ambiente !== 'produccion') this.config.emision_ambiente = 'beta';
+      this.config.serie_boleta = this.config.serie_boleta || 'B001';
+      this.config.serie_factura = this.config.serie_factura || 'F001';
+
       this.saved = false;
       this.testing = false;
       this.testResult = null;
@@ -84,6 +100,9 @@ var App = window.App || (window.App = {});
       this.certMsg = null;
       this.certBusy = false;
       this.srvEstado = undefined; // undefined | 'cargando' | {ok, conf|error}
+      this.emiEstado = undefined; // [NUEVO] undefined | 'cargando' | {ok, conf|error}
+      this.emiMsg = null; // [NUEVO]
+      this.menuMsg = null; // [NUEVO]
       this.detOpen = false;
 
       // Empresa (API)
@@ -106,6 +125,7 @@ var App = window.App || (window.App = {});
       this._renderHTML();
       this._bind();
       if (this.tab === 'conexion' && this.srvEstado === undefined) this._verificarServidor();
+      if (this.tab === 'conexion' && this.emiEstado === undefined) this._verificarEmision(); // [NUEVO]
       if (App.isConfigured()) this._cargarEmpresa();
     }
 
@@ -127,7 +147,7 @@ var App = window.App || (window.App = {});
           + this._navHTML()
 
           + '<div style="margin-top: 1.25rem;">'
-            + (this.tab === 'conexion' ? this._tabConexionHTML() + this._certPfxHTML()
+            + (this.tab === 'conexion' ? this._tabConexionHTML() + this._certPfxHTML() + this._emisionHTML()
               : this.tab === 'empresa' ? this._tabEmpresaHTML()
               : this._tabSistemaHTML())
           + '</div>'
@@ -274,6 +294,18 @@ var App = window.App || (window.App = {});
       return u;
     }
 
+    /** [NUEVO] URL válida de la función de emisión (ruta relativa o del mismo dominio). */
+    _urlEmision() {
+      var u = this.config.emision_url || '/api/sunat-emitir';
+      if (/^https?:\/\//i.test(u)) {
+        var mismo = false;
+        try { mismo = new URL(u).origin === window.location.origin; } catch (e) { mismo = false; }
+        if (!mismo) u = '/api/sunat-emitir';
+      }
+      if (u.indexOf('sunat-emitir') === -1) u = '/api/sunat-emitir';
+      return u;
+    }
+
     async _verificarServidor() {
       this.srvEstado = 'cargando';
       try {
@@ -291,7 +323,25 @@ var App = window.App || (window.App = {});
       if (this.container && this.container.isConnected && this.tab === 'conexion') this._rerender();
     }
 
-    /** Lista de credenciales: ✔ si están en Vercel o escritas aquí, ✖ si faltan. */
+    /** [NUEVO] Comprueba la función de emisión y qué variables tiene el servidor (sin ver valores). */
+    async _verificarEmision() {
+      this.emiEstado = 'cargando';
+      try {
+        var r = await fetch(this._urlEmision());
+        var d = await r.json().catch(function () { return {}; });
+        if (!r.ok || !d.configuradas) {
+          throw new Error(r.status === 404
+            ? 'La función de emisión aún no existe en el servidor (404). Sube api/sunat-emitir.js a la raíz del repo.'
+            : 'El servidor respondió algo inesperado (' + r.status + ').');
+        }
+        this.emiEstado = { ok: true, conf: d.configuradas, ambiente: d.ambiente_por_defecto };
+      } catch (e) {
+        this.emiEstado = { ok: false, error: (e instanceof TypeError) ? 'No se pudo conectar con el servidor.' : e.message };
+      }
+      if (this.container && this.container.isConnected && this.tab === 'conexion') this._rerender();
+    }
+
+    /** Lista de credenciales: ✔ si están en GitHub o escritas aquí, ✖ si faltan. */
     _estadoServidorHTML() {
       var e = this.srvEstado;
       var c = this.config;
@@ -331,10 +381,54 @@ var App = window.App || (window.App = {});
         + '<div style="margin-top: 0.5rem;">' + filas + '</div>'
         + '<div style="margin-top: 0.5rem; font-size: 0.8125rem; font-weight: 600; color: ' + (faltan ? ERROR : OK) + ';">'
           + (faltan
-            ? 'Faltan ' + faltan + '. Agrégalas en Vercel → Settings → Environment Variables (' + items.map(function (i) { return i[0]; }).join(', ') + ') y haz Redeploy.'
+            ? 'Faltan ' + faltan + '. Agrégalas en GitHub → Settings → Secrets and variables (' + items.map(function (i) { return i[0]; }).join(', ') + ') y vuelve a desplegar.'
             : 'Credenciales completas. Ya puedes ingresar con SUNAT.')
         + '</div>'
         + '<div class="cfg-acciones" style="margin-top: 0.75rem;"><button id="s-srv-verificar" type="button" class="btn-secondary text-sm">Verificar de nuevo</button></div>'
+        + '</div>';
+    }
+
+    /** [NUEVO] Estado de la función de emisión: qué variables tiene el servidor. */
+    _estadoEmisionHTML() {
+      var e = this.emiEstado;
+      var cab = '<div style="margin-top: 1rem; padding: 1rem; border-radius: 0.875rem; background: ' + SUPERFICIE + ';">'
+        + '<div style="font-weight: 700; color: ' + TEXTO + '; font-size: 0.875rem;">Servidor de emisión</div>';
+
+      if (!e || e === 'cargando') {
+        return cab + '<div style="margin-top: 0.5rem; font-size: 0.8125rem; color: ' + TEXTO2 + ';">Verificando el servidor...</div></div>';
+      }
+      if (!e.ok) {
+        return cab
+          + '<div style="margin-top: 0.5rem; font-size: 0.8125rem; color: ' + ERROR + ';">' + App.escapeHtml(e.error) + '</div>'
+          + '<div class="cfg-acciones" style="margin-top: 0.75rem;"><button id="m-verificar" type="button" class="btn-secondary text-sm">Verificar de nuevo</button></div></div>';
+      }
+
+      var items = [
+        ['SUNAT_RUC', 'RUC'],
+        ['SUNAT_USER_SOL', 'Usuario SOL'],
+        ['SUNAT_PASS_SOL', 'Clave SOL'],
+        ['SUNAT_CERT_P12_BASE64', 'Certificado (.p12)'],
+        ['SUNAT_CERT_PASSWORD', 'Contraseña del certificado'],
+      ];
+      var faltan = 0;
+      var filas = items.map(function (it) {
+        var bien = !!e.conf[it[0]];
+        if (!bien) faltan++;
+        return '<div style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.8125rem; color: ' + TEXTO2 + '; padding: 0.15rem 0;">'
+          + '<span style="font-weight: 800; color: ' + (bien ? OK : ERROR) + ';">' + (bien ? '✔' : '✖') + '</span>'
+          + '<span style="min-width: 11rem;">' + it[1] + '</span>'
+          + '<span style="color: ' + TENUE + '; font-size: 0.75rem;">' + (bien ? 'en el servidor' : 'falta') + '</span>'
+          + '</div>';
+      }).join('');
+
+      return cab
+        + '<div style="margin-top: 0.5rem;">' + filas + '</div>'
+        + '<div style="margin-top: 0.5rem; font-size: 0.8125rem; font-weight: 600; color: ' + (faltan ? ERROR : OK) + ';">'
+          + (faltan
+            ? 'Faltan ' + faltan + '. Agrégalas como secretos en GitHub → Settings → Secrets and variables (' + items.map(function (i) { return i[0]; }).join(', ') + ') y vuelve a desplegar.'
+            : 'Servidor listo para emitir.')
+        + '</div>'
+        + '<div class="cfg-acciones" style="margin-top: 0.75rem;"><button id="m-verificar" type="button" class="btn-secondary text-sm">Verificar de nuevo</button></div>'
         + '</div>';
     }
 
@@ -359,7 +453,7 @@ var App = window.App || (window.App = {});
           + '<details id="s-det" style="margin-top: 1rem;"' + (this.detOpen ? ' open' : '') + '>'
             + '<summary style="cursor: pointer; font-size: 0.8125rem; font-weight: 700; color: ' + TEXTO2 + ';">Usar credenciales escritas aquí (opcional)</summary>'
             + '<div style="margin-top: 0.875rem;">'
-            + '<p class="text-xs" style="color: rgb(100 116 139); margin-bottom: 0.75rem;">Solo si no quieres usar las del servidor. Si las dejas vacías se usan las de Vercel.</p>'
+            + '<p class="text-xs" style="color: rgb(100 116 139); margin-bottom: 0.75rem;">Solo si no quieres usar las del servidor. Si las dejas vacías se usan las de GitHub.</p>'
             + '<div class="cfg-acciones" style="margin: 1rem 0; align-items: center;">'
             + '<button id="s-cargar" type="button" class="btn-secondary text-sm"><i data-lucide="upload" class="w-4 h-4"></i> Cargar credenciales</button>'
             + '<button id="s-plantilla" type="button" class="btn-secondary text-sm"><i data-lucide="download" class="w-4 h-4"></i> Descargar plantilla</button>'
@@ -395,7 +489,7 @@ var App = window.App || (window.App = {});
                   + '<input id="s-sunat-url" class="input font-mono" style="flex: 1;" value="' + App.escapeHtml(c.sunat_token_url || '') + '" placeholder="/api/sunat-token" />'
                   + '<button id="s-sunat-reset" type="button" class="btn-secondary text-sm" title="Volver al valor por defecto">Restablecer</button>'
                 + '</div>',
-                'Por defecto <strong>/api/sunat-token</strong> (el archivo api/sunat-token.js de tu proyecto en Vercel). No pongas aquí páginas de SUNAT.')
+                'Por defecto <strong>/api/sunat-token</strong> (el archivo api/sunat-token.js de tu proyecto en GitHub). No pongas aquí páginas de SUNAT.')
           + '</div>'
 
           + '<div class="cfg-acciones" style="margin-top: 1.25rem; align-items: center;">'
@@ -405,11 +499,14 @@ var App = window.App || (window.App = {});
                 ? '<i data-lucide="loader-2" class="w-4 h-4 icon-spin"></i> Probando...'
                 : '<i data-lucide="plug" class="w-4 h-4"></i> Ingresar con SUNAT')
             + '</button>'
+            // [NUEVO] Entrada a la plataforma SUNAT Menú SOL
+            + '<button id="s-menu-sol" type="button" class="btn-secondary"><i data-lucide="external-link" class="w-4 h-4"></i> Entrar a SUNAT (Menú SOL)</button>'
             + (this.saved
               ? '<span style="font-size: 0.8125rem; font-weight: 600; color: rgb(22 163 74); display: inline-flex; align-items: center; gap: 0.25rem;">'
                 + '<i data-lucide="check-circle-2" class="w-4 h-4"></i> Guardado</span>'
               : '')
           + '</div>'
+          + this._msgHTML(this.menuMsg)
 
           + this._testResultHTML()
         + '</div>';
@@ -474,8 +571,16 @@ var App = window.App || (window.App = {});
                   + '<div>Archivo: ' + App.escapeHtml(info.archivo || '—') + '</div>'
                 + '</div>'
                 + '<div class="cfg-acciones" style="margin-top: 0.75rem;">'
+                  // [NUEVO] Copia el .p12 en base64 para pegarlo como secreto del servidor
+                  + (c.cert_pfx ? '<button id="s-cert-copiar" type="button" class="btn-secondary text-sm"><i data-lucide="copy" class="w-4 h-4"></i> Copiar para el servidor (base64)</button>' : '')
                   + '<button id="s-cert-quitar" type="button" class="btn-secondary text-sm"><i data-lucide="trash-2" class="w-4 h-4"></i> Quitar certificado</button>'
                 + '</div>'
+                + (c.cert_pfx
+                  ? '<p class="text-xs" style="color: rgb(100 116 139); margin-top: 0.625rem; line-height: 1.6;">'
+                    + 'Para emitir boletas y facturas, pega ese texto como secreto <strong>SUNAT_CERT_P12_BASE64</strong> en GitHub '
+                    + '(y la contraseña en <strong>SUNAT_CERT_PASSWORD</strong>). No lo compartas con nadie.'
+                    + '</p>'
+                  : '')
               + '</div>'
             : '')
 
@@ -491,6 +596,64 @@ var App = window.App || (window.App = {});
                 : '<i data-lucide="upload" class="w-4 h-4"></i> ' + (info ? 'Reemplazar certificado' : 'Cargar certificado'))
             + '</button>'
             + (msg ? '<span style="font-size: 0.8125rem; font-weight: 600; color: ' + (msg.tipo === 'ok' ? OK : ERROR) + ';">' + App.escapeHtml(msg.texto) + '</span>' : '')
+          + '</div>'
+        + '</div>';
+    }
+
+    // ═══ [NUEVO] Emisión de boletas y facturas (SEE - Del Contribuyente) ═══
+    _emisionHTML() {
+      var c = this.config;
+      var prod = c.emision_ambiente === 'produccion';
+
+      return ''
+        + '<div class="card" style="margin-top: 1rem;">'
+          + '<h2 class="section-title"><i data-lucide="file-text" class="w-5 h-5"></i> Emisión de boletas y facturas</h2>'
+          + '<p class="text-xs" style="color: rgb(71 85 105); line-height: 1.6; margin-bottom: 1rem;">'
+            + 'Emite por el sistema <strong>SEE - Del Contribuyente</strong>: el servidor arma el XML, lo firma con tu certificado y lo envía a SUNAT. '
+            + 'Cada comprobante devuelve el resultado real de SUNAT (aceptado o rechazado).'
+          + '</p>'
+
+          + '<div class="cfg-grid">'
+            + this._campo('Ambiente',
+                '<select id="m-ambiente" class="input">'
+                  + '<option value="beta"' + (!prod ? ' selected' : '') + '>Pruebas (beta de SUNAT)</option>'
+                  + '<option value="produccion"' + (prod ? ' selected' : '') + '>Producción (comprobantes reales)</option>'
+                + '</select>',
+                prod
+                  ? 'En producción los comprobantes son reales ante SUNAT.'
+                  : 'En pruebas no se emite nada real. Pasa a producción cuando las pruebas salgan aceptadas.')
+            + this._campo('URL de la función de emisión',
+                '<div style="display: flex; gap: 0.5rem;">'
+                  + '<input id="m-url" class="input font-mono" style="flex: 1;" value="' + App.escapeHtml(c.emision_url || '') + '" placeholder="/api/sunat-emitir" />'
+                  + '<button id="m-url-reset" type="button" class="btn-secondary text-sm" title="Volver al valor por defecto">Restablecer</button>'
+                + '</div>',
+                'Por defecto <strong>/api/sunat-emitir</strong> (el archivo api/sunat-emitir.js de tu proyecto).')
+          + '</div>'
+
+          + '<div class="cfg-grid" style="margin-top: 0.875rem;">'
+            + this._campo('Serie de boletas', '<input id="m-serie-b" class="input font-mono" maxlength="4" value="' + App.escapeHtml(c.serie_boleta || '') + '" placeholder="B001" />', 'Letra B + 3 caracteres.')
+            + this._campo('Serie de facturas', '<input id="m-serie-f" class="input font-mono" maxlength="4" value="' + App.escapeHtml(c.serie_factura || '') + '" placeholder="F001" />', 'Letra F + 3 caracteres.')
+          + '</div>'
+
+          + '<div style="margin-top: 1rem; font-size: 0.8125rem; font-weight: 700; color: ' + TEXTO2 + ';">Datos del emisor que salen en el comprobante</div>'
+          + '<div style="margin-top: 0.5rem;">'
+            + this._campo('Razón social', '<input id="m-razon" class="input" value="' + App.escapeHtml(c.emisor_razon_social || '') + '" />')
+          + '</div>'
+          + '<div style="margin-top: 0.875rem;">'
+            + this._campo('Dirección fiscal', '<input id="m-direccion" class="input" value="' + App.escapeHtml(c.emisor_direccion || '') + '" />')
+          + '</div>'
+          + '<div class="cfg-grid-4" style="margin-top: 0.875rem;">'
+            + this._campo('Ubigeo', '<input id="m-ubigeo" class="input font-mono" maxlength="6" value="' + App.escapeHtml(c.emisor_ubigeo || '') + '" placeholder="6 dígitos" />')
+            + this._campo('Departamento', '<input id="m-departamento" class="input" value="' + App.escapeHtml(c.emisor_departamento || '') + '" />')
+            + this._campo('Provincia', '<input id="m-provincia" class="input" value="' + App.escapeHtml(c.emisor_provincia || '') + '" />')
+            + this._campo('Distrito', '<input id="m-distrito" class="input" value="' + App.escapeHtml(c.emisor_distrito || '') + '" />')
+          + '</div>'
+
+          + this._estadoEmisionHTML()
+          + this._msgHTML(this.emiMsg)
+
+          + '<div class="cfg-acciones" style="margin-top: 1.25rem; align-items: center;">'
+            + '<button id="m-guardar" class="btn-primary"><i data-lucide="save" class="w-4 h-4"></i> Guardar emisión</button>'
           + '</div>'
         + '</div>';
     }
@@ -850,7 +1013,7 @@ var App = window.App || (window.App = {});
         ['ruc', 'usuario_sol', 'clave_sol', 'client_id', 'client_secret'].forEach(function (k) { delete self.config[k]; });
         App.saveConfig(self.config);
         self.detOpen = true;
-        self.cargaMsg = { tipo: 'ok', texto: 'Campos vaciados. Ahora se usan las credenciales de Vercel.' };
+        self.cargaMsg = { tipo: 'ok', texto: 'Campos vaciados. Ahora se usan las credenciales de GitHub.' };
         self._rerender();
       });
       var verif = c.querySelector('#s-srv-verificar');
@@ -891,7 +1054,44 @@ var App = window.App || (window.App = {});
         self.certMsg = { tipo: 'ok', texto: 'Certificado quitado.' };
         self._rerender();
       });
+      // [NUEVO] Copiar el certificado en base64 para el servidor
+      var certCopiar = c.querySelector('#s-cert-copiar');
+      if (certCopiar) certCopiar.addEventListener('click', function () { self._copiarCertBase64(); });
+
       c.querySelector('#s-test').addEventListener('click', function () { self._probar(); });
+
+      // [NUEVO] Entrada a SUNAT Menú SOL
+      var menuSol = c.querySelector('#s-menu-sol');
+      if (menuSol) menuSol.addEventListener('click', function () { self._abrirMenuSol(); });
+
+      // [NUEVO] Emisión de boletas y facturas
+      [['#m-url', 'emision_url'], ['#m-razon', 'emisor_razon_social'], ['#m-direccion', 'emisor_direccion'],
+       ['#m-ubigeo', 'emisor_ubigeo'], ['#m-departamento', 'emisor_departamento'],
+       ['#m-provincia', 'emisor_provincia'], ['#m-distrito', 'emisor_distrito']].forEach(function (par) {
+        var el = c.querySelector(par[0]);
+        if (!el) return;
+        el.addEventListener('input', function (e) { self.config[par[1]] = e.target.value; });
+      });
+      [['#m-serie-b', 'serie_boleta'], ['#m-serie-f', 'serie_factura']].forEach(function (par) {
+        var el = c.querySelector(par[0]);
+        if (!el) return;
+        el.addEventListener('input', function (e) {
+          e.target.value = e.target.value.toUpperCase();
+          self.config[par[1]] = e.target.value;
+        });
+      });
+      var ambSel = c.querySelector('#m-ambiente');
+      if (ambSel) ambSel.addEventListener('change', function (e) {
+        self.config.emision_ambiente = e.target.value === 'produccion' ? 'produccion' : 'beta';
+        App.saveConfig(self.config);
+        self._rerender();
+      });
+      var mReset = c.querySelector('#m-url-reset');
+      if (mReset) mReset.addEventListener('click', function () { self.config.emision_url = '/api/sunat-emitir'; self._rerender(); });
+      var mVerif = c.querySelector('#m-verificar');
+      if (mVerif) mVerif.addEventListener('click', function () { self.emiEstado = 'cargando'; self._rerender(); self._verificarEmision(); });
+      var mGuardar = c.querySelector('#m-guardar');
+      if (mGuardar) mGuardar.addEventListener('click', function () { self._guardarEmision(); });
 
       var irEmpresa = c.querySelector('#s-ir-empresa');
       if (irEmpresa) irEmpresa.addEventListener('click', function () {
@@ -981,6 +1181,72 @@ var App = window.App || (window.App = {});
         self.saved = false;
         self._rerender();
       }, 2000);
+    }
+
+    /** [NUEVO] Guarda la configuración de emisión tras validar series y ubigeo. */
+    _guardarEmision() {
+      var c = this.config;
+      var sb = String(c.serie_boleta || '').toUpperCase();
+      var sf = String(c.serie_factura || '').toUpperCase();
+      var ub = String(c.emisor_ubigeo || '').trim();
+
+      if (sb && !/^B[A-Z0-9]{3}$/.test(sb)) { this._msg('emiMsg', 'error', 'La serie de boletas debe ser la letra B más 3 caracteres (ej. B001).'); return; }
+      if (sf && !/^F[A-Z0-9]{3}$/.test(sf)) { this._msg('emiMsg', 'error', 'La serie de facturas debe ser la letra F más 3 caracteres (ej. F001).'); return; }
+      if (ub && !/^\d{6}$/.test(ub)) { this._msg('emiMsg', 'error', 'El ubigeo debe tener 6 dígitos.'); return; }
+
+      c.serie_boleta = sb;
+      c.serie_factura = sf;
+      c.emision_url = this._urlEmision();
+      App.saveConfig(c);
+      this._msg('emiMsg', 'ok', 'Configuración de emisión guardada.');
+    }
+
+    /** [NUEVO] Abre la plataforma SUNAT Menú SOL en una pestaña nueva. */
+    async _abrirMenuSol() {
+      var url = MENU_SOL_URL;
+      // Se abre la pestaña de inmediato para que el navegador no la bloquee
+      var w = window.open('', '_blank');
+      try {
+        var r = await fetch(this._urlFuncion(), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ servicio: 'menu' }),
+        });
+        var d = await r.json().catch(function () { return {}; });
+        if (d && d.ok && d.url) url = d.url;
+      } catch (e) { /* si la función no responde se usa la dirección directa */ }
+
+      if (w) {
+        w.location.href = url;
+      } else {
+        window.open(url, '_blank');
+      }
+      this.menuMsg = { tipo: 'ok', texto: 'Se abrió SUNAT Menú SOL. Ingresa allí con tu RUC, usuario y clave SOL.' };
+      this._rerender();
+    }
+
+    /** [NUEVO] Copia el .p12 guardado (base64) para pegarlo como secreto del servidor. */
+    async _copiarCertBase64() {
+      var b64 = this.config.cert_pfx;
+      if (!b64) { this.certMsg = { tipo: 'error', texto: 'No hay certificado guardado.' }; this._rerender(); return; }
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          await navigator.clipboard.writeText(b64);
+        } else {
+          var ta = document.createElement('textarea');
+          ta.value = b64;
+          ta.style.position = 'fixed';
+          ta.style.opacity = '0';
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand('copy');
+          ta.remove();
+        }
+        this.certMsg = { tipo: 'ok', texto: 'Copiado. Pégalo como secreto SUNAT_CERT_P12_BASE64 en GitHub.' };
+      } catch (e) {
+        this.certMsg = { tipo: 'error', texto: 'No se pudo copiar: ' + e.message };
+      }
+      this._rerender();
     }
 
     /** Carga la librería forge (solo cuando se necesita) para leer el .pfx. */
@@ -1151,9 +1417,10 @@ var App = window.App || (window.App = {});
           }),
         });
         var data = await r.json().catch(function () { return {}; });
-        if (!r.ok || !data.ok) {
+        // El token debe ser el real que entrega SUNAT: sin token no se da por conectado
+        if (!r.ok || !data.ok || !data.access_token) {
           throw new Error(data.error || (r.status === 404
-            ? 'Error 404: la función no existe en el servidor. Sube api/sunat-token.js a la raíz de tu repositorio y espera el deploy en Vercel.'
+            ? 'Error 404: la función no existe en el servidor. Sube api/sunat-token.js a la raíz de tu repositorio en GitHub y espera el deploy.'
             : 'Error ' + r.status + ' al contactar la función de SUNAT'));
         }
         this.config.sunat_ok = true;
@@ -1165,7 +1432,7 @@ var App = window.App || (window.App = {});
         var msg = e.message;
         if (e instanceof TypeError || /failed to fetch|networkerror|load failed/i.test(msg)) {
           msg = 'No se pudo llegar a ' + (this.config.sunat_token_url || '/api/sunat-token') + '. '
-            + 'Causas comunes: la URL es de otro dominio (pulsa "Restablecer"), Vercel tiene protección activa en este enlace, '
+            + 'Causas comunes: la URL es de otro dominio (pulsa "Restablecer"), el servidor tiene protección activa en este enlace, '
             + 'o la función aún no terminó de desplegarse.';
         }
         this.testResult = { success: false, error: msg };
