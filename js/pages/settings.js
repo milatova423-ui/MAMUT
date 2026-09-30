@@ -83,6 +83,8 @@ var App = window.App || (window.App = {});
       this.cargaMsg = null;
       this.certMsg = null;
       this.certBusy = false;
+      this.srvEstado = undefined; // undefined | 'cargando' | {ok, conf|error}
+      this.detOpen = false;
 
       // Empresa (API)
       this.empresa = null;
@@ -103,6 +105,7 @@ var App = window.App || (window.App = {});
       this.router = router;
       this._renderHTML();
       this._bind();
+      if (this.tab === 'conexion' && this.srvEstado === undefined) this._verificarServidor();
       if (App.isConfigured()) this._cargarEmpresa();
     }
 
@@ -259,6 +262,82 @@ var App = window.App || (window.App = {});
       + '</div>';
     }
 
+    /** URL válida de la función (ruta relativa o del mismo dominio). */
+    _urlFuncion() {
+      var u = this.config.sunat_token_url || '/api/sunat-token';
+      if (/^https?:\/\//i.test(u)) {
+        var mismo = false;
+        try { mismo = new URL(u).origin === window.location.origin; } catch (e) { mismo = false; }
+        if (!mismo) u = '/api/sunat-token';
+      }
+      if (u.indexOf('sunat-token') === -1) u = '/api/sunat-token';
+      return u;
+    }
+
+    async _verificarServidor() {
+      this.srvEstado = 'cargando';
+      try {
+        var r = await fetch(this._urlFuncion() + '?estado=1');
+        var d = await r.json().catch(function () { return {}; });
+        if (!r.ok || !d.configuradas) {
+          throw new Error(r.status === 404
+            ? 'La función aún no existe en el servidor (404). Revisa que api/sunat-token.js esté en la raíz del repo.'
+            : 'El servidor respondió algo inesperado (' + r.status + ').');
+        }
+        this.srvEstado = { ok: true, conf: d.configuradas };
+      } catch (e) {
+        this.srvEstado = { ok: false, error: (e instanceof TypeError) ? 'No se pudo conectar con el servidor.' : e.message };
+      }
+      if (this.container && this.container.isConnected && this.tab === 'conexion') this._rerender();
+    }
+
+    /** Lista de credenciales: ✔ si están en Vercel o escritas aquí, ✖ si faltan. */
+    _estadoServidorHTML() {
+      var e = this.srvEstado;
+      var c = this.config;
+      var cab = '<div style="margin-top: 1rem; padding: 1rem; border-radius: 0.875rem; background: ' + SUPERFICIE + ';">'
+        + '<div style="font-weight: 700; color: ' + TEXTO + '; font-size: 0.875rem;">Credenciales de SUNAT</div>';
+
+      if (!e || e === 'cargando') {
+        return cab + '<div style="margin-top: 0.5rem; font-size: 0.8125rem; color: ' + TEXTO2 + ';">Verificando el servidor...</div></div>';
+      }
+      if (!e.ok) {
+        return cab
+          + '<div style="margin-top: 0.5rem; font-size: 0.8125rem; color: ' + ERROR + ';">' + App.escapeHtml(e.error) + '</div>'
+          + '<div class="cfg-acciones" style="margin-top: 0.75rem;"><button id="s-srv-verificar" type="button" class="btn-secondary text-sm">Verificar de nuevo</button></div></div>';
+      }
+
+      var items = [
+        ['SUNAT_RUC', 'RUC', 'ruc'],
+        ['SUNAT_USER_SOL', 'Usuario SOL', 'usuario_sol'],
+        ['SUNAT_PASS_SOL', 'Clave SOL', 'clave_sol'],
+        ['SUNAT_CLIENT_ID', 'Id de la API', 'client_id'],
+        ['SUNAT_CLIENT_SECRET', 'Clave de la API', 'client_secret'],
+      ];
+      var faltan = 0;
+      var filas = items.map(function (it) {
+        var enServidor = !!e.conf[it[0]];
+        var enForm = !!c[it[2]];
+        var bien = enServidor || enForm;
+        if (!bien) faltan++;
+        return '<div style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.8125rem; color: ' + TEXTO2 + '; padding: 0.15rem 0;">'
+          + '<span style="font-weight: 800; color: ' + (bien ? OK : ERROR) + ';">' + (bien ? '✔' : '✖') + '</span>'
+          + '<span style="min-width: 7.5rem;">' + it[1] + '</span>'
+          + '<span style="color: ' + TENUE + '; font-size: 0.75rem;">' + (enServidor ? 'en el servidor' : (enForm ? 'escrita aquí' : 'falta')) + '</span>'
+          + '</div>';
+      }).join('');
+
+      return cab
+        + '<div style="margin-top: 0.5rem;">' + filas + '</div>'
+        + '<div style="margin-top: 0.5rem; font-size: 0.8125rem; font-weight: 600; color: ' + (faltan ? ERROR : OK) + ';">'
+          + (faltan
+            ? 'Faltan ' + faltan + '. Agrégalas en Vercel → Settings → Environment Variables (' + items.map(function (i) { return i[0]; }).join(', ') + ') y haz Redeploy.'
+            : 'Credenciales completas. Ya puedes ingresar con SUNAT.')
+        + '</div>'
+        + '<div class="cfg-acciones" style="margin-top: 0.75rem;"><button id="s-srv-verificar" type="button" class="btn-secondary text-sm">Verificar de nuevo</button></div>'
+        + '</div>';
+    }
+
     _tabConexionHTML() {
       var c = this.config;
       var sunatOn = c.sunat_activo !== false;
@@ -276,7 +355,12 @@ var App = window.App || (window.App = {});
           + this._interruptorHTML('s-sunat-activo', sunatOn, 'Aceptar conexión con SUNAT',
               'Si lo desactivas, el sistema no se conecta a SUNAT.')
 
-          + '<div class="cfg-acciones" style="margin: 1rem 0; align-items: center;">'
+          + this._estadoServidorHTML()
+          + '<details id="s-det" style="margin-top: 1rem;"' + (this.detOpen ? ' open' : '') + '>'
+            + '<summary style="cursor: pointer; font-size: 0.8125rem; font-weight: 700; color: ' + TEXTO2 + ';">Usar credenciales escritas aquí (opcional)</summary>'
+            + '<div style="margin-top: 0.875rem;">'
+            + '<p class="text-xs" style="color: rgb(100 116 139); margin-bottom: 0.75rem;">Solo si no quieres usar las del servidor. Si las dejas vacías se usan las de Vercel.</p>'
+            + '<div class="cfg-acciones" style="margin: 1rem 0; align-items: center;">'
             + '<button id="s-cargar" type="button" class="btn-secondary text-sm"><i data-lucide="upload" class="w-4 h-4"></i> Cargar credenciales</button>'
             + '<button id="s-plantilla" type="button" class="btn-secondary text-sm"><i data-lucide="download" class="w-4 h-4"></i> Descargar plantilla</button>'
             + '<input id="s-cargar-file" type="file" accept=".json,application/json" style="display: none;" />'
@@ -292,6 +376,9 @@ var App = window.App || (window.App = {});
             + this._campo('Id de la API SUNAT', '<input id="s-client-id" class="input font-mono" autocomplete="off" value="' + App.escapeHtml(c.client_id || '') + '" placeholder="e89e00c9-264e-..." />', 'Menú SOL → Registro de su aplicación.')
             + this._campo('Clave de la API SUNAT', '<input id="s-client-secret" type="password" class="input font-mono" autocomplete="new-password" value="' + App.escapeHtml(c.client_secret || '') + '" placeholder="Clave de la aplicación" />')
           + '</div>'
+
+            + '</div>'
+          + '</details>'
 
           + '<div style="margin-top: 0.875rem;">'
             + this._campo('URL de la función SUNAT (servidor)',
@@ -747,6 +834,10 @@ var App = window.App || (window.App = {});
       });
 
       c.querySelector('#s-save').addEventListener('click', function () { self._guardarConfig(); });
+      var verif = c.querySelector('#s-srv-verificar');
+      if (verif) verif.addEventListener('click', function () { self.srvEstado = 'cargando'; self._rerender(); self._verificarServidor(); });
+      var det = c.querySelector('#s-det');
+      if (det) det.addEventListener('toggle', function () { self.detOpen = det.open; });
       var save2 = c.querySelector('#s-save2');
       if (save2) save2.addEventListener('click', function () { self._guardarConfig(); });
 
@@ -1029,13 +1120,8 @@ var App = window.App || (window.App = {});
 
       try {
         var cf = this.config;
-        var urlFn = cf.sunat_token_url || '/api/sunat-token';
-        // Solo se acepta ruta relativa o del mismo dominio (nunca páginas de Vercel o SUNAT)
-        var okUrl = true;
-        if (/^https?:\/\//i.test(urlFn)) {
-          try { okUrl = new URL(urlFn).origin === window.location.origin; } catch (e2) { okUrl = false; }
-        }
-        if (!okUrl || urlFn.indexOf('sunat-token') === -1) { urlFn = '/api/sunat-token'; cf.sunat_token_url = urlFn; }
+        var urlFn = this._urlFuncion();
+        cf.sunat_token_url = urlFn;
         var r = await fetch(urlFn, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
