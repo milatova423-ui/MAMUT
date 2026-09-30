@@ -1,31 +1,13 @@
 // api/sunat-token.js  (Vercel Serverless Function, va en la RAÍZ del repo: /api/sunat-token.js)
 //
-// Recibe por POST las credenciales que escribes en Configuración y le pide el
-// token OAuth a SUNAT. También acepta variables de entorno como respaldo.
+// Pide el token OAuth a SUNAT. Las credenciales se toman así:
+//   1) Las que llegan en el POST (si las escribes en Configuración → opción avanzada), o
+//   2) Las variables de entorno de Vercel (recomendado):
+//      SUNAT_RUC, SUNAT_USER_SOL, SUNAT_PASS_SOL, SUNAT_CLIENT_ID, SUNAT_CLIENT_SECRET
+//      (opcional: SUNAT_SCOPE)
 //
-// Aplicación registrada en SUNAT (menú SOL > API SUNAT):
-//   Nombre: SFE_SYSTEM
-//   URL:    https://sfesystem.vercel.app/
-//   Id:     cbdd60a1-de9a-4dac-bf8f-021bd46249d8
-//   Clave:  E5AWuY4x+KML1WWMM0rd/w==
-//   Fecha de registro: 29/09/2026
-//
-// Prioridad de cada dato: 1) Body JSON  2) Variable de entorno  3) Valor registrado en SUNAT (abajo)
-//
-// Body JSON (todos opcionales si ya están las variables de entorno / valores por defecto):
-//   { ruc, usuario_sol, clave_sol, client_id, client_secret, scope? }
-
-const SUNAT_APP = {
-  nombre: 'SFE_SYSTEM',
-  url: 'https://sfesystem.vercel.app/',
-  client_id: 'cbdd60a1-de9a-4dac-bf8f-021bd46249d8',
-  client_secret: 'E5AWuY4x+KML1WWMM0rd/w==',
-  fecha_registro: '29/09/2026',
-};
-
-const SUNAT_SCOPE_DEFAULT = 'https://api-cpe.sunat.gob.pe';
-const SUNAT_TOKEN_URL = (id) =>
-  'https://api-seguridad.sunat.gob.pe/v1/clientessol/' + encodeURIComponent(id) + '/oauth2/token/';
+// GET  -> comprueba que la función existe e indica qué credenciales hay en el servidor (sin valores)
+// POST -> body JSON opcional: { ruc, usuario_sol, clave_sol, client_id, client_secret, scope? }
 
 module.exports = async function handler(req, res) {
   const origin = req.headers.origin || '*';
@@ -35,23 +17,20 @@ module.exports = async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   if (req.method === 'OPTIONS') return res.status(204).end();
 
-  // Abrir la URL en el navegador: sirve para comprobar que la función SÍ está desplegada
+  // GET: comprueba que la función existe e indica qué credenciales hay en el servidor (sin mostrar valores)
   if (req.method === 'GET') {
+    const hay = (k) => !!process.env[k];
     return res.status(200).json({
       ok: true,
-      mensaje: 'Función sunat-token activa. Usa POST con tus credenciales.',
-      aplicacion: {
-        nombre: SUNAT_APP.nombre,
-        url: SUNAT_APP.url,
-        client_id: SUNAT_APP.client_id,
-        fecha_registro: SUNAT_APP.fecha_registro,
+      mensaje: 'Función sunat-token activa. Usa POST para pedir el token.',
+      configuradas: {
+        SUNAT_RUC: hay('SUNAT_RUC'),
+        SUNAT_USER_SOL: hay('SUNAT_USER_SOL'),
+        SUNAT_PASS_SOL: hay('SUNAT_PASS_SOL'),
+        SUNAT_CLIENT_ID: hay('SUNAT_CLIENT_ID'),
+        SUNAT_CLIENT_SECRET: hay('SUNAT_CLIENT_SECRET'),
       },
-      requiere_en_post: ['ruc', 'usuario_sol', 'clave_sol'],
     });
-  }
-
-  if (req.method !== 'POST') {
-    return res.status(405).json({ ok: false, error: 'Método no permitido. Usa POST.' });
   }
 
   let b = req.body || {};
@@ -61,9 +40,9 @@ module.exports = async function handler(req, res) {
   const ruc = String(b.ruc || env.SUNAT_RUC || '').trim();
   const usuarioSol = String(b.usuario_sol || env.SUNAT_USER_SOL || '').trim();
   const claveSol = String(b.clave_sol || env.SUNAT_PASS_SOL || '');
-  const clientId = String(b.client_id || env.SUNAT_CLIENT_ID || SUNAT_APP.client_id).trim();
-  const clientSecret = String(b.client_secret || env.SUNAT_CLIENT_SECRET || SUNAT_APP.client_secret).trim();
-  const scope = String(b.scope || env.SUNAT_SCOPE || SUNAT_SCOPE_DEFAULT).trim();
+  const clientId = String(b.client_id || env.SUNAT_CLIENT_ID || '').trim();
+  const clientSecret = String(b.client_secret || env.SUNAT_CLIENT_SECRET || '').trim();
+  const scope = String(b.scope || env.SUNAT_SCOPE || 'https://api-cpe.sunat.gob.pe').trim();
 
   const faltan = [];
   if (!/^\d{11}$/.test(ruc)) faltan.push('RUC (11 dígitos)');
@@ -72,7 +51,10 @@ module.exports = async function handler(req, res) {
   if (!clientId) faltan.push('Id de la API');
   if (!clientSecret) faltan.push('Clave de la API');
   if (faltan.length) {
-    return res.status(400).json({ ok: false, error: 'Falta: ' + faltan.join(', ') });
+    return res.status(400).json({
+      ok: false,
+      error: 'Falta: ' + faltan.join(', ') + '. Configúralo en Vercel → Settings → Environment Variables y haz Redeploy.',
+    });
   }
 
   const body = new URLSearchParams({
@@ -85,12 +67,10 @@ module.exports = async function handler(req, res) {
   });
 
   try {
-    // Conexión directa a SUNAT para obtener el token
-    const r = await fetch(SUNAT_TOKEN_URL(clientId), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body,
-    });
+    const r = await fetch(
+      'https://api-seguridad.sunat.gob.pe/v1/clientessol/' + encodeURIComponent(clientId) + '/oauth2/token/',
+      { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body }
+    );
     const data = await r.json().catch(() => ({}));
 
     if (!r.ok) {
@@ -104,7 +84,6 @@ module.exports = async function handler(req, res) {
       access_token: data.access_token,
       token_type: data.token_type,
       expires_in: data.expires_in,
-      aplicacion: SUNAT_APP.nombre,
     });
   } catch (e) {
     return res.status(502).json({ ok: false, error: 'No se pudo contactar a SUNAT: ' + e.message });
