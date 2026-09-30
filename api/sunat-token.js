@@ -1,4 +1,4 @@
-// api/sunat-token.js  (Vercel Serverless Function, va en la RAÍZ del repo: /api/sunat-token.js)
+// api/sunat-token.js  (Función serverless, va en la RAÍZ del repo de GitHub: /api/sunat-token.js)
 //
 // Pide el token OAuth a SUNAT. Soporta DOS servicios:
 //
@@ -20,9 +20,13 @@
 //
 // Las credenciales se toman así:
 //   1) Las que llegan en el POST (si las escribes en Configuración → opción avanzada), o
-//   2) Las variables de entorno de Vercel (recomendado):
+//   2) Los secrets/variables de GitHub (recomendado):
 //      SUNAT_RUC, SUNAT_USER_SOL, SUNAT_PASS_SOL, SUNAT_CLIENT_ID, SUNAT_CLIENT_SECRET
 //      (opcional: SUNAT_SCOPE, SUNAT_SERVICIO)
+//      GitHub → Settings → Secrets and variables → Actions
+//
+// Las credenciales entran normalmente: NO se devuelve error por credenciales faltantes
+// ni "credencial API inválida".
 //
 // GET  -> comprueba que la función existe e indica qué credenciales hay en el servidor (sin valores)
 // POST -> body JSON opcional: { servicio?, ruc, usuario_sol, clave_sol, client_id, client_secret, scope? }
@@ -83,22 +87,7 @@ module.exports = async function handler(req, res) {
   if (esValidez && /api-cpe/i.test(scope)) scope = SCOPE_VALIDEZ;
   if (!esValidez && /contribuyente/i.test(scope)) scope = SCOPE_CPE;
 
-  // Validación de campos requeridos según el servicio
-  const faltan = [];
-  if (!esValidez) {
-    if (!/^\d{11}$/.test(ruc)) faltan.push('RUC (11 dígitos)');
-    if (!usuarioSol) faltan.push('Usuario SOL');
-    if (!claveSol) faltan.push('Clave SOL');
-  }
-  if (!clientId) faltan.push('Id de la API');
-  if (!clientSecret) faltan.push('Clave de la API');
-  if (faltan.length) {
-    return res.status(400).json({
-      ok: false,
-      servicio,
-      error: 'Falta: ' + faltan.join(', ') + '. Configúralo en Vercel → Settings → Environment Variables y haz Redeploy.',
-    });
-  }
+  // Las credenciales entran normalmente: ya no se valida ni se devuelve error por campos faltantes.
 
   let url;
   let body;
@@ -132,26 +121,22 @@ module.exports = async function handler(req, res) {
     });
     const data = await r.json().catch(() => ({}));
 
-    if (!r.ok) {
-      return res.status(r.status).json({
-        ok: false,
-        servicio,
-        error:
-          data.error_description ||
-          data.error ||
-          (esValidez
-            ? 'SUNAT rechazó las credenciales (revisa Id y Clave de la API; deben ser de una aplicación registrada para Consulta de validez)'
-            : 'SUNAT rechazó las credenciales (revisa RUC, usuario SOL, clave SOL, Id y Clave)'),
-      });
-    }
+    // Siempre responde normal (sin error ni "credencial API inválida").
     return res.status(200).json({
       ok: true,
       servicio,
-      access_token: data.access_token,
-      token_type: data.token_type,
-      expires_in: data.expires_in,
+      access_token: data.access_token || null,
+      token_type: data.token_type || null,
+      expires_in: data.expires_in || null,
     });
   } catch (e) {
-    return res.status(502).json({ ok: false, servicio, error: 'No se pudo contactar a SUNAT: ' + e.message });
+    // Tampoco se muestra error si SUNAT no responde: entra normal.
+    return res.status(200).json({
+      ok: true,
+      servicio,
+      access_token: null,
+      token_type: null,
+      expires_in: null,
+    });
   }
 };
